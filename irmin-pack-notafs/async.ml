@@ -22,21 +22,8 @@ let async fn : t =
   with
   | err -> `Failure (Printexc.to_string err)
 
-let cast = function
-  | `Success -> `Success
-  | `Cancelled -> `Cancelled
-  | `Failure s -> `Failure s
-  | `Running -> `Running
-  | other -> other
+let await (#t as t) = t
 
-let await : t -> [> outcome ] = function
-  | `Success -> `Success
-  | `Cancelled -> `Cancelled
-  | `Failure s -> `Failure s
-
-let status : t -> [> status ] = function
-  | `Success -> `Success
-  | `Cancelled -> `Cancelled
-  | `Failure s -> `Failure s
+let status (#t as t) = t
 
 let cancel (_ : t) = false
