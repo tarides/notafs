@@ -1,0 +1,4 @@
+(library
+ (public_name index-notafs)
+ (name index_notafs)
+ (libraries mirage-clock optint index notafs mtime lwt_direct))

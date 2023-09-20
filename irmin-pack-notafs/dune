@@ -1,0 +1,13 @@
+(library
+ (public_name irmin-pack-notafs)
+ (name irmin_pack_notafs)
+ (libraries
+  lwt_direct
+  index_notafs
+  irmin
+  irmin-pack
+  irmin-pack.io
+  mirage-clock
+  progress.engine)
+ (preprocess
+  (pps ppx_irmin.internal)))

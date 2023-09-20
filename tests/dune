@@ -1,0 +1,16 @@
+(executable
+ (name test_irmin)
+ (modules test_irmin)
+ (libraries
+  lwt
+  eio.mock
+  irmin
+  irmin_pack_notafs
+  mirage-block-unix
+  mtime.clock.os
+  block_viz))
+
+(library
+ (name block_viz)
+ (modules block_viz)
+ (libraries notafs graphics color))

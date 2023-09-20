@@ -1,0 +1,4 @@
+(library
+ (public_name lwt_direct)
+ (name lwt_direct)
+ (libraries lwt))
