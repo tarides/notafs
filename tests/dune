@@ -13,4 +13,4 @@
 (library
  (name block_viz)
  (modules block_viz)
- (libraries notafs graphics color))
+ (libraries notafs graphics color unix))

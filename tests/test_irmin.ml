@@ -147,7 +147,21 @@ let main ~fresh () =
   done ;
   ()
 
-let () =
+(* cmdliner *)
+open Cmdliner
+
+let sleep =
+  Arg.(
+    value & opt float (0.) & info [ "s"; "sleep" ] ~docv:"sleep" ~doc:"sleep time in seconds")
+
+let main sleep =
+  B.sleep := sleep;
   Lwt_main.run
   @@ Lwt_direct.indirect
   @@ fun () -> Eio_mock.Backend.run @@ main ~fresh:true
+
+let main_cmd =
+  let info = Cmd.info "graphics" in
+  Cmd.v info Term.(const main $ sleep)
+
+let () = exit (Cmd.eval ~catch:false main_cmd)
