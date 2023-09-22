@@ -98,7 +98,9 @@ let main ~fresh () =
       "world"
   end ;
   let gc_commits = ref [] in
+  let gc_run = ref 0 in
   let do_gc () =
+    incr gc_run;
     B.draw_status block (Printf.sprintf "garbage collect START") ;
     match List.rev !gc_commits with
     | commit :: rest ->
@@ -107,7 +109,7 @@ let main ~fresh () =
       @@ fun repo _main ->
       (match Store.Gc.start_exn ~unlink:true repo commit with
        | status ->
-         Format.printf "GC run: %b@." status ;
+         Format.printf "GC run %d: %b@." !gc_run status ;
          B.draw_status block (Printf.sprintf "garbage collect FINALISE") ;
          let _ = Store.Gc.finalise_exn ~wait:false repo in
          B.draw_status block (Printf.sprintf "garbage collect DONE") ;

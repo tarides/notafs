@@ -137,6 +137,7 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
 end
 
 module Make (B : DISK) = struct
+  module C = Checkseum.Crc32c
   let debug = false
 
   type t = T : (module S with type t = 'a) * 'a -> t
@@ -169,7 +170,7 @@ module Make (B : DISK) = struct
     catch
     @@ fun () ->
     if debug then Format.printf "Notafs.format@." ;
-    let* (module A_disk) = Context.of_impl (module B) block in
+    let* (module A_disk) = Context.of_impl (module B) (module C) block in
     let (module S) = (module Make_disk (A_disk) : S) in
     or_fail
     @@
@@ -181,7 +182,7 @@ module Make (B : DISK) = struct
     catch
     @@ fun () ->
     if debug then Format.printf "Notafs.of_block@." ;
-    let* (module A_disk) = Context.of_impl (module B) block in
+    let* (module A_disk) = Context.of_impl (module B) (module C) block in
     let (module S) = (module Make_disk (A_disk) : S) in
     or_fail
     @@

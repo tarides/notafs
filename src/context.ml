@@ -6,6 +6,7 @@ module type DISK = sig
 end
 
 module type A_DISK = sig
+  module C : Checkseum.S
   type read_error = private [> Mirage_block.error ]
   type write_error = private [> Mirage_block.write_error ]
 
@@ -23,10 +24,11 @@ module type A_DISK = sig
   val flush : unit -> unit
 end
 
-let of_impl (type t) (module B : DISK with type t = t) (disk : t) : (module A_DISK) Lwt.t =
+let of_impl (type t) (module B : DISK with type t = t) (module C : Checkseum.S) (disk : t) : (module A_DISK) Lwt.t =
   let open Lwt.Syntax in
   let+ info = B.get_info disk in
   (module struct
+    module C = C
     type read_error = B.error
     type write_error = B.write_error
 

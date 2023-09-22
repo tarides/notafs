@@ -57,6 +57,8 @@ end = struct
       let hash = Hashtbl.hash
     end)
 
+  module C = B.C
+
   type id = Int64.t
 
   let id_t : id Repr.t = Repr.int64
@@ -78,31 +80,43 @@ end = struct
     | Parent of t * int
 
   type ptr =
-    | Disk of id
+    | Disk of id * C.t
     | Mem of t
+
+  let cs_t : C.t Repr.t =
+    Repr.map
+      Repr.int32
+      (fun cs-> C.of_int32 cs)
+      (fun cs -> C.to_int32 cs)
+
+  let get_checksum cstruct = C.digest_bigstring (Cstruct.to_bigarray cstruct) 0 B.page_size C.default
 
   let ptr_t : ptr Repr.t =
     Repr.map
-      id_t
-      (fun id -> Disk id)
+      Repr.(pair id_t cs_t)
+      (fun (id, cs) -> Disk (id, cs))
       (function
-       | Disk id -> id
+       | Disk (id, cs) -> id, cs
        | _ -> invalid_arg "Sector.ptr_t: serialize Mem")
 
   let to_ptr t =
     match t.id with
-    | Root id | At id -> Disk id
+    | Root id | At id ->
+      let cs = get_checksum t.cstruct in
+      Disk (id, cs)
     | In_memory -> invalid_arg "Sector.to_ptr: not allocated"
 
   let null_id = Int64.zero
+  let null_cs = C.default
   let id_size = 8
-  let checksum_size = 0
-  let ptr_size = id_size + checksum_size
+  let cs_size = 4
+  let ptr_size = id_size + cs_size
   let is_null_id id = Int64.equal null_id id
-  let null_ptr = Disk Int64.zero
+  let is_null_cs cs = C.equal null_cs cs
+  let null_ptr = Disk (null_id, null_cs)
 
   let is_null_ptr = function
-    | Disk id -> is_null_id id
+    | Disk (id, cs) -> is_null_id id && is_null_cs cs
     | Mem _ -> false
 
   let root_loc i = Root i
@@ -120,16 +134,21 @@ end = struct
     | _ -> true
 
   let set_child_ptr t offset = function
-    | Disk ptr -> Cstruct.HE.set_uint64 t.cstruct offset ptr
+    | Disk (id, cs) ->
+      Cstruct.HE.set_uint64 t.cstruct offset id;
+      Cstruct.HE.set_uint32 t.cstruct (offset + id_size) (C.to_int32 cs)
     | Mem child ->
       assert (is_in_memory t) ;
       Cstruct.HE.set_uint64 t.cstruct offset null_id ;
+      Cstruct.HE.set_uint32 t.cstruct (offset + id_size) (C.to_int32 null_cs) ;
       H.replace t.children offset child ;
       assert (H.mem t.children offset)
 
   let ptr_of_t t =
     match t.id with
-    | Root id | At id -> Disk id
+    | Root id | At id ->
+      let cs = get_checksum t.cstruct in
+      Disk (id, cs)
     | In_memory -> Mem t
 
   let set_child t offset child =
@@ -178,6 +197,7 @@ end = struct
   let erase_child_ptr t offset =
     release t ;
     Cstruct.HE.set_uint64 t.cstruct offset null_id ;
+    Cstruct.HE.set_uint32 t.cstruct (offset + id_size) (C.to_int32 null_cs) ;
     try H.remove t.children offset with
     | Not_found -> ()
 
@@ -230,7 +250,8 @@ end = struct
     try Mem (H.find t.children offset) with
     | Not_found ->
       let id = Cstruct.HE.get_uint64 t.cstruct offset in
-      Disk id
+      let cs = C.of_int32 (Cstruct.HE.get_uint32 t.cstruct (offset + id_size)) in
+      Disk (id, cs)
 
   let read id =
     let cstruct = Cstruct.create B.page_size in
@@ -242,16 +263,20 @@ end = struct
     { id = Root id; cstruct; children = H.create 4; parent = Detached }
 
   let load = function
-    | Disk id ->
+    | Disk (id, cs) ->
       let+ cstruct = read id in
+      let cs' = get_checksum cstruct in
+      assert (C.equal cs cs');
       { id = At id; cstruct; children = H.create 4; parent = Detached }
     | Mem t -> Lwt_result.return t
 
   let get_child t offset =
     match get_child_ptr t offset with
     | Mem child -> Lwt_result.return child
-    | Disk id ->
+    | Disk (id, cs) ->
       let+ cstruct = read id in
+      let cs' = get_checksum cstruct in
+      assert (C.equal cs cs');
       { id = At id; cstruct; children = H.create 4; parent = Parent (t, offset) }
 
   let set_child t offset child =
@@ -280,20 +305,24 @@ end = struct
             | In_memory ->
               let prev = Cstruct.HE.get_uint64 t.cstruct offset in
               assert (Int64.equal prev null_id) ;
-              let child_id, acc, ids = finalize child ids acc in
+              let child_id, child_cs, acc, ids = finalize child ids acc in
               Cstruct.HE.set_uint64 t.cstruct offset child_id ;
+              Cstruct.HE.set_uint32 t.cstruct (offset + id_size) (C.to_int32 child_cs);
               ids, acc)
           t.children
           (ids, acc)
       in
       H.clear t.children ;
-      id, t :: acc, ids
-    | (Root id | At id), _ -> id, acc, ids
+      let cs = get_checksum t.cstruct in
+      id, cs, t :: acc, ids
+    | (Root id | At id), _ ->
+      let cs = get_checksum t.cstruct in
+      id, cs, acc, ids
     | _, [] -> invalid_arg "Sector.finalize: empty list"
 
   let finalize t ids =
     let e = count_new t in
-    let _, ts, ids' = finalize t ids [] in
+    let _, _, ts, ids' = finalize t ids [] in
     assert (List.length ids' + e = List.length ids) ;
     ts, ids'
 

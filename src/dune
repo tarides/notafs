@@ -1,6 +1,6 @@
 (library
  (public_name notafs)
  (name notafs)
- (libraries lwt mirage-block repr)
+ (libraries lwt mirage-block repr checkseum.ocaml)
  (preprocess
   (pps ppx_repr)))
