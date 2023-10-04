@@ -120,7 +120,7 @@ module Make (Clock : Mirage_clock.MCLOCK) (B : Notafs.DISK) = struct
       let size_header file = Header_raw.header_size file
 
       let offset filename =
-        let size = Fs.size filename in
+        let size = Lwt_direct.direct (fun () -> Fs.size filename) in
         let hs = size_header filename in
         Int63.of_int (size - hs)
 

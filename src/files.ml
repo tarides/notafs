@@ -19,10 +19,16 @@ module Make (B : Context.A_DISK) = struct
   let string_of_raw = Repr.(unstage (to_bin_string raw_t))
   let raw_of_string = Repr.(unstage (of_bin_string raw_t))
 
+  let rec count_new_list acc = function
+    | [] -> Lwt_result.return acc
+    | (_filename, rope) :: xs ->
+      let* c = Rope.count_new !rope in
+      count_new_list (acc + c) xs
+
   let count_new t =
-    let files_count = M.fold (fun _ s acc -> acc + Rope.count_new !s) t.files 0 in
+    let* files_count = count_new_list 0 @@ M.bindings t.files in
     let+ on_disk_count =
-      if files_count = 0 && not t.dirty
+      if files_count = 0 && (not t.dirty) && (not !B.dirty) && false
       then Lwt_result.return 0
       else begin
         let fake =
@@ -30,32 +36,36 @@ module Make (B : Context.A_DISK) = struct
         in
         let str = string_of_raw fake in
         let* rope = Rope.of_string str in
-        let+ () = Rope.free t.on_disk in
+        let* () = Rope.free t.on_disk in
         t.on_disk <- rope ;
         Rope.count_new rope
       end
     in
     files_count + on_disk_count
 
+  let rec flush_ropes (files, to_flush, allocated) = function
+    | [] -> Lwt_result.return (files, to_flush, allocated)
+    | (filename, rope) :: rest ->
+      let* to_flush', allocated =
+        if Sector.is_in_memory !rope
+        then Sector.finalize !rope allocated
+        else Lwt_result.return ([], allocated)
+      in
+      let ptr = Sector.to_ptr !rope in
+      let acc = (filename, ptr) :: files, List.rev_append to_flush' to_flush, allocated in
+      flush_ropes acc rest
+
   let to_payload t allocated =
-    let files, to_flush, allocated =
-      List.fold_left
-        (fun (files, to_flush, allocated) (filename, rope) ->
-          let to_flush', allocated =
-            if Sector.is_in_memory !rope
-            then Sector.finalize !rope allocated
-            else [], allocated
-          in
-          let ptr = Sector.to_ptr !rope in
-          (filename, ptr) :: files, List.rev_append to_flush' to_flush, allocated)
-        ([], [], allocated)
-        (M.bindings t.files)
+    let* files, to_flush, allocated =
+      flush_ropes ([], [], allocated) (M.bindings t.files)
     in
     let str = string_of_raw files in
-    assert (String.length str = Rope.size t.on_disk) ;
-    let+ rope = Rope.blit_from_string t.on_disk 0 str 0 (String.length str) in
+    let* on_disk_size = Rope.size t.on_disk in
+    assert (String.length str = on_disk_size) ;
+    let* rope = Rope.blit_from_string t.on_disk 0 str 0 (String.length str) in
     t.on_disk <- rope ;
-    let to_flush', allocated = Sector.finalize t.on_disk allocated in
+    let+ to_flush', allocated = Sector.finalize t.on_disk allocated in
+    assert (List.length to_flush' > 0) ;
     t.dirty <- false ;
     rope, List.rev_append to_flush' to_flush, allocated
 
@@ -77,11 +87,13 @@ module Make (B : Context.A_DISK) = struct
       files
     | Error (`Msg err) -> Lwt.fail_with err
 
-  let make () = { on_disk = Rope.create (); files = M.empty; dirty = false }
+  let make () =
+    let+ on_disk = Rope.create () in
+    { on_disk; files = M.empty; dirty = false }
 
   let load on_disk_ptr =
     if Sector.is_null_ptr on_disk_ptr
-    then Lwt_result.return (make ())
+    then make ()
     else
       let* on_disk = Rope.load on_disk_ptr in
       let+ files = of_disk_repr on_disk in
@@ -96,9 +108,7 @@ module Make (B : Context.A_DISK) = struct
     match find_opt t filename with
     | None -> Lwt_result.return t
     | Some rope ->
-      let* r = Rope.of_string "" in
       let+ () = Rope.free !rope in
-      rope := r ;
       t.dirty <- true ;
       let files = M.remove filename t.files in
       { t with files }

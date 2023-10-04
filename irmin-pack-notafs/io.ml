@@ -91,11 +91,7 @@ module Make (Clock : Mirage_clock.MCLOCK) (B : Notafs.DISK) = struct
   let move_file ~src ~dst = Ok (Lwt_direct.direct @@ fun () -> Fs.rename (fs ()) ~src ~dst)
 
   let copy_file ~src ~dst =
-    let err = open_out "/tmp/err" in
-    Printf.fprintf err "copy_file ~src:%S ~dst:%S\n%!" src dst ;
-    close_out err ;
-    Format.printf "Io.copy_file@." ;
-    let _ = failwith "Io.copy_file" in
+    let _ = failwith (Printf.sprintf "Io.copy_file ~src:%S ~dst:%S" src dst) in
     Error (`Sys_error "copy_file")
 
   let readdir _path = []
@@ -118,18 +114,23 @@ module Make (Clock : Mirage_clock.MCLOCK) (B : Notafs.DISK) = struct
   let read_all_to_string t =
     Lwt_direct.direct
     @@ fun () ->
-    let len = Fs.size t in
-    let bytes = Bytes.create len in
     let open Lwt.Syntax in
+    let* len = Fs.size t in
+    let bytes = Bytes.create len in
     let+ _ = Fs.blit_to_bytes t ~off:0 ~len bytes in
     Ok (Bytes.to_string bytes)
 
-  let read_size t = Ok (Fs.size t |> Int63.of_int)
+  let read_size t =
+    Lwt_direct.direct
+    @@ fun () ->
+    let open Lwt.Syntax in
+    let+ len = Fs.size t in
+    Ok (Int63.of_int len)
 
   let size_of_path path =
     match Fs.find (fs ()) path with
     | None -> Error (`No_such_file_or_directory ("size_of_path: " ^ path))
-    | Some file -> Ok (Fs.size file |> Int63.of_int)
+    | Some file -> read_size file
 
   let classify_path path =
     if path = "/"

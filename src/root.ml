@@ -10,8 +10,8 @@ module Make (B : Context.A_DISK) : sig
   val load : unit -> t io
   val format : unit -> t io
   val update : t -> queue:Queue.q -> payload:Sector.t -> unit io
-  val get_free_queue : t -> Int64.t * Sector.ptr
-  val get_payload : t -> Sector.ptr
+  val get_free_queue : t -> (Int64.t * Sector.ptr) io
+  val get_payload : t -> Sector.ptr io
   val flush : Sector.t list -> unit io
 end = struct
   module Schema = Schema.Make (B)
@@ -19,13 +19,38 @@ end = struct
   module Queue = Queue.Make (B)
   open Lwt_result.Syntax
 
-  let nb = 32
+  let nb = 2
+
+  let rec regroup (first, last, cs, acc) = function
+    | [] -> List.rev ((first, List.rev cs) :: acc)
+    | (id, c) :: rest ->
+      if Int64.(equal (succ last) id)
+      then regroup (first, id, c :: cs, acc) rest
+      else regroup (id, id, [ c ], (first, List.rev cs) :: acc) rest
+
+  let regroup = function
+    | [] -> invalid_arg "Root.regroup: empty list"
+    | (id, c) :: rest -> regroup (id, id, [ c ], []) rest
+
+  let rec list_to_write acc = function
+    | [] -> Lwt_result.return acc
+    | x :: xs ->
+      let* w = Sector.to_write x in
+      list_to_write (w :: acc) xs
+
+  let regroup lst =
+    let+ lst = list_to_write [] lst in
+    regroup @@ List.sort (fun (a_id, _) (b_id, _) -> Int64.compare a_id b_id) lst
 
   let rec flush = function
     | [] -> Lwt_result.return ()
-    | s :: ss ->
-      let* () = Sector.write s in
-      flush ss
+    | (id, cs) :: css ->
+      let* () = B.write id cs in
+      flush css
+
+  let flush lst =
+    let* lst = regroup lst in
+    flush lst
 
   type schema =
     { generation : int64 Schema.field
@@ -62,6 +87,12 @@ end = struct
     ; generations : Sector.t array
     }
 
+  let rec find_latest_generation g = function
+    | [] -> Lwt_result.return g
+    | s :: ss ->
+      let* gen = generation s in
+      find_latest_generation (Int64.max g gen) ss
+
   let load () =
     let rec load_gens i acc =
       if i >= nb
@@ -70,33 +101,34 @@ end = struct
         let* generation = Sector.load_root (Int64.of_int i) in
         load_gens (i + 1) (generation :: acc)
     in
-    let+ generations = load_gens 0 [] in
+    let* generations = load_gens 0 [] in
+    let+ generation = find_latest_generation Int64.zero generations in
     let generations = Array.of_list generations in
-    let generation =
-      Array.fold_left (fun g s -> Int64.max g (generation s)) Int64.zero generations
-    in
     { generation; generations }
 
   let format () =
     let free_start = Int64.of_int nb in
-    let generation = Int64.of_int (nb + 1) in
-    let generations =
-      List.init nb (fun i ->
+    let generation = Int64.of_int 0 in
+    let* generations =
+      let create_gen i =
         let i = Int64.of_int i in
-        let s = Sector.create ~at:(Sector.root_loc i) () in
-        set_generation s i ;
-        set_free_start s free_start ;
-        set_free_queue s Sector.null_ptr ;
-        set_payload s Sector.null_ptr ;
-        s)
+        let* s = Sector.create ~at:(Sector.root_loc i) () in
+        let* () = set_generation s Int64.zero in
+        let* () = set_free_start s free_start in
+        let* () = set_free_queue s Sector.null_ptr in
+        let+ () = set_payload s Sector.null_ptr in
+        s
+      in
+      let rec create_gens i acc =
+        if i >= nb
+        then Lwt_result.return (List.rev acc)
+        else
+          let* g = create_gen i in
+          create_gens (i + 1) (g :: acc)
+      in
+      create_gens 0 []
     in
-    let rec write_all = function
-      | [] -> Lwt_result.return ()
-      | g :: gs ->
-        let* () = Sector.write g in
-        write_all gs
-    in
-    let+ () = write_all generations in
+    let+ () = flush generations in
     let generations = Array.of_list generations in
     { generation; generations }
 
@@ -106,16 +138,18 @@ end = struct
   let update t ~queue:(new_free_start, new_free_root) ~payload =
     t.generation <- Int64.succ t.generation ;
     let s = current t in
-    set_generation s t.generation ;
-    set_free_start s new_free_start ;
-    set_free_queue s (Sector.to_ptr new_free_root) ;
-    set_payload s (Sector.to_ptr payload) ;
-    Sector.write s
+    let* () = set_generation s t.generation in
+    let* () = set_free_start s new_free_start in
+    let* () = set_free_queue s (Sector.to_ptr new_free_root) in
+    let* () = set_payload s (Sector.to_ptr payload) in
+    let* id, cstruct = Sector.to_write s in
+    B.write id [ cstruct ]
 
   let get_free_queue t =
     let g = current t in
-    let queue = free_queue g in
-    get_free_start g, queue
+    let* queue = free_queue g in
+    let+ free_start = get_free_start g in
+    free_start, queue
 
   let get_payload t = get_payload (current t)
 end

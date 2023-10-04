@@ -6,38 +6,24 @@ module type DISK = Context.DISK
 module type S = sig
   type t
   type error
+  type 'a io := ('a, error) Lwt_result.t
 
-  val format : unit -> (t, error) Lwt_result.t
-  val of_block : unit -> (t, error) Lwt_result.t
-  val flush : t -> (unit, error) Lwt_result.t
+  val format : unit -> t io
+  val of_block : unit -> t io
+  val flush : t -> unit io
 
   type file
 
   val filename : file -> string
-  val size : file -> int
+  val size : file -> int io
   val mem : t -> string -> bool
-
-  val append_substring
-    :  t
-    -> file
-    -> string
-    -> off:int
-    -> len:int
-    -> (unit, error) Lwt_result.t
-
-  val blit_from_string
-    :  t
-    -> file
-    -> off:int
-    -> len:int
-    -> string
-    -> (unit, error) Lwt_result.t
-
-  val blit_to_bytes : file -> off:int -> len:int -> bytes -> (int, error) Lwt_result.t
-  val rename : t -> src:string -> dst:string -> (unit, error) Lwt_result.t
-  val touch : t -> string -> string -> (file, error) Lwt_result.t
-  val replace : t -> string -> string -> (unit, error) Lwt_result.t
-  val remove : t -> string -> (unit, error) Lwt_result.t
+  val append_substring : t -> file -> string -> off:int -> len:int -> unit io
+  val blit_from_string : t -> file -> off:int -> len:int -> string -> unit io
+  val blit_to_bytes : file -> off:int -> len:int -> bytes -> int io
+  val rename : t -> src:string -> dst:string -> unit io
+  val touch : t -> string -> string -> file io
+  val replace : t -> string -> string -> unit io
+  val remove : t -> string -> unit io
   val find_opt : t -> string -> file option
 end
 
@@ -57,9 +43,19 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
     }
 
   let of_root root =
-    let* files = Files.load (Root.get_payload root) in
-    let+ free_queue = Queue.load (Root.get_free_queue root) in
-    { root; files; free_queue }
+    let* payload = Root.get_payload root in
+    let* files = Files.load payload in
+    let* free_queue = Root.get_free_queue root in
+    let+ free_queue = Queue.load free_queue in
+    let t = { root; files; free_queue } in
+    (B.allocator
+       := fun required ->
+            let t_free_queue = t.free_queue in
+            let+ free_queue, allocated = Queue.pop_front t_free_queue required in
+            assert (t.free_queue == t_free_queue) ;
+            t.free_queue <- free_queue ;
+            allocated) ;
+    t
 
   let format () =
     let* root = Root.format () in
@@ -70,22 +66,33 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
     of_root root
 
   let flush t =
+    assert !B.safe_lru ;
+    B.safe_lru := false ;
     let* required = Files.count_new t.files in
-    if required = 0
-    then Lwt_result.return ()
-    else begin
-      let* free_queue = Queue.push_discarded t.free_queue in
-      let* free_queue, allocated = Queue.pop_front free_queue required in
-      assert (List.length allocated = required) ;
-      let* free_queue, to_flush_queue = Queue.self_allocate ~free_queue in
-      let* payload_root, to_flush, allocated = Files.to_payload t.files allocated in
-      assert (allocated = []) ;
-      let* () = Root.flush (List.rev_append to_flush_queue to_flush) in
-      let+ () = Root.update t.root ~queue:free_queue ~payload:payload_root in
-      assert (B.acquire_discarded () = []) ;
-      t.free_queue <- free_queue ;
-      B.flush ()
-    end
+    let+ () =
+      if required = 0
+      then begin
+        assert (B.acquire_discarded () = []) ;
+        Lwt_result.return ()
+      end
+      else begin
+        let t_free_queue = t.free_queue in
+        let* free_queue = Queue.push_discarded t.free_queue in
+        let* free_queue, allocated = Queue.pop_front free_queue required in
+        assert (List.length allocated = required) ;
+        let* free_queue, to_flush_queue = Queue.self_allocate ~free_queue in
+        let* payload_root, to_flush, allocated = Files.to_payload t.files allocated in
+        assert (allocated = []) ;
+        let* () = Root.flush (List.rev_append to_flush_queue to_flush) in
+        let+ () = Root.update t.root ~queue:free_queue ~payload:payload_root in
+        assert (B.acquire_discarded () = []) ;
+        assert (t.free_queue == t_free_queue) ;
+        t.free_queue <- free_queue ;
+        B.flush ()
+      end
+    in
+    B.safe_lru := true ;
+    ()
 
   let filename t = fst t
 
@@ -94,7 +101,14 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
     rope := t_rope
 
   let append_substring t filename str ~off ~len =
-    let str = String.sub str off len in
+    let str =
+      if off = 0 && len = String.length str
+      then str
+      else begin
+        (* TODO *)
+        String.sub str off len
+      end
+    in
     append t filename str
 
   let rename t ~src ~dst =
@@ -265,10 +279,13 @@ module Make (B : DISK) = struct
     or_fail @@ X.blit_from_string t file ~off ~len string
 
   let size (File ((module X), _, file)) =
-    catch'
+    catch
     @@ fun () ->
     if debug then Format.printf "Notafs.size@." ;
-    let r = X.size file in
+    or_fail
+    @@
+    let open Lwt_result.Syntax in
+    let+ r = X.size file in
     if debug then Format.printf "Notafs.size: %i@." r ;
     r
 end

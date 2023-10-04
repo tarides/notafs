@@ -188,35 +188,30 @@ end = struct
     t
 
   let disconnect t = B.disconnect t.block
-
   let sleep = ref 0.
 
   let pause () =
     let exception Resume in
     try
-      while true
-      do
+      while true do
         match Graphics.read_key () with
-        | ' '
-        | 'p' ->
-          Fmt.pr "Graphics: resume execution@.";
+        | ' ' | 'p' ->
+          Fmt.pr "Graphics: resume execution@." ;
           raise Resume
         | _ -> ()
       done
     with
-      | Resume -> ()
+    | Resume -> ()
 
   let flush t =
     refresh t ;
-    while Graphics.key_pressed ()
-    do
+    while Graphics.key_pressed () do
       match Graphics.read_key () with
-      | ' '
-      | 'p' ->
-        Fmt.pr "Graphics: pause execution@.";
+      | ' ' | 'p' ->
+        Fmt.pr "Graphics: pause execution@." ;
         pause ()
       | _ -> ()
-    done;
+    done ;
     let w, _ = t.size in
     G.set_color G.white ;
     G.fill_rect 0 0 w (border_bottom - 15) ;

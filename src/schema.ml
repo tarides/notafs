@@ -2,8 +2,8 @@ module Make (B : Context.A_DISK) = struct
   module Sector = Sector.Make (B)
 
   type ('set, 'get) bifield =
-    { get : Sector.t -> 'get
-    ; set : Sector.t -> 'set -> unit
+    { get : Sector.t -> ('get, B.error) Lwt_result.t
+    ; set : Sector.t -> 'set -> (unit, B.error) Lwt_result.t
     }
   (* let bifield_map f g t = { get = (fun s -> f (t.get s)); set = (fun s x -> t.set s (g x)) } *)
 
@@ -79,7 +79,6 @@ module Make (B : Context.A_DISK) = struct
     let rest = max_size - ofs in
     let size_of_thing = size_of ~max_size:rest thing in
     let max_length = rest / size_of_thing in
-    assert (max_length < 128) ;
     let end_ofs = ofs + (max_length * size_of_thing) in
     end_ofs, { length; max_length; location = ofs; size_of_thing; thing }
 
@@ -89,7 +88,7 @@ module Make (B : Context.A_DISK) = struct
     let _, t = array.thing ~max_size:0 (array.location + (array.size_of_thing * i)) in
     t
 
-  type child = (Sector.t, (Sector.t, B.error) Lwt_result.t) bifield
+  type child = (Sector.t, Sector.t) bifield
 
   let child : child t = make Sector.ptr_size Sector.get_child Sector.set_child
 

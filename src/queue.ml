@@ -4,8 +4,6 @@ module Make (B : Context.A_DISK) = struct
 
   type t = Sector.t
 
-  let make ~free_start = free_start, Sector.create ()
-
   type schema =
     { height : int Schema.field
     ; children : Schema.child Schema.dyn_array (* if height > 0 *)
@@ -37,73 +35,40 @@ module Make (B : Context.A_DISK) = struct
     let set_free_sector t i v = t.@(nth free_sectors i) <- v
   end
 
-  let create () =
-    let t = Sector.create () in
-    set_height t 0 ;
-    set_nb_children t 0 ;
-    t
+  open Lwt_result.Syntax
 
-  (*
-     let rec pp h t =
-     let len = nb_children t in
-     let id =
-     match t.id with
-     | None -> ""
-     | Some i -> Int64.to_string i
-     in
-     Format.fprintf
-     h
-     "(%i) %5s: %2i <%i/%i>"
-     (Obj.magic t)
-     id
-     (height t)
-     len
-     children.max_length ;
-     (* (max_children t) ; *)
-     for i = 0 to len - 1 do
-     Format.fprintf
-     h
-     " %2s"
-     (Int64.to_string id)
-     (match get_child_ptr t i with
-     | Sector.Disk id -> Int64.to_string id
-     | Sector.Mem _ -> "MM" (* | exception Not_found -> "??"*))
-     done ;
-     Format.fprintf h "@." ;
-     Sector.H.iter
-     (fun offset child -> Format.fprintf h "AT(%i)  %a" offset pp child)
-     t.Sector.children
-  *)
+  let create () =
+    let* t = Sector.create () in
+    let* () = set_height t 0 in
+    let+ () = set_nb_children t 0 in
+    t
 
   type push_back =
     | Ok_push
     | Overflow of Sector.id list
 
-  open Lwt_result.Syntax
-
   let rec do_push_back t (children : Sector.id list) =
     assert (children <> []) ;
-    let h = height t in
+    let* h = height t in
     if h = 0
     then begin
-      let n = nb_free_sectors t in
+      let* n = nb_free_sectors t in
       let max_length = free_sectors.max_length in
       let rec go i = function
         | [] ->
-          set_nb_free_sectors t i ;
+          let+ () = set_nb_free_sectors t i in
           Ok_push
         | children when i >= max_length ->
-          set_nb_free_sectors t i ;
+          let+ () = set_nb_free_sectors t i in
           Overflow children
         | (child_ptr : Sector.id) :: children ->
-          (* t.@(Schema.at free_sectors i) <- child_ptr ; *)
-          set_free_sector t i child_ptr ;
+          let* () = set_free_sector t i child_ptr in
           go (i + 1) children
       in
-      Lwt_result.return (go n children)
+      go n children
     end
     else begin
-      let n = nb_children t in
+      let* n = nb_children t in
       let max_length = schema.children.max_length in
       assert (n > 0) ;
       assert (n <= max_length) ;
@@ -113,9 +78,9 @@ module Make (B : Context.A_DISK) = struct
           Lwt_result.return (Overflow children)
         end
         else begin
-          let last = create () in
-          set_nb_children t (i + 1) ;
-          set_child t i last ;
+          let* last = create () in
+          let* () = set_nb_children t (i + 1) in
+          let* () = set_child t i last in
           let* res = do_push_back last children in
           match res with
           | Ok_push -> Lwt_result.return Ok_push
@@ -135,10 +100,11 @@ module Make (B : Context.A_DISK) = struct
     match res with
     | Ok_push -> Lwt_result.return t
     | Overflow children ->
-      let root = create () in
-      set_height root (height t + 1) ;
-      set_nb_children root 1 ;
-      set_child root 0 t ;
+      let* root = create () in
+      let* t_height = height t in
+      let* () = set_height root (t_height + 1) in
+      let* () = set_nb_children root 1 in
+      let* () = set_child root 0 t in
       push_back_list root children
 
   let rec push_discarded t =
@@ -155,63 +121,69 @@ module Make (B : Context.A_DISK) = struct
   let shift_left t nb =
     let off = schema.free_sectors.Schema.location in
     let len = nb * schema.free_sectors.Schema.size_of_thing in
-    Sector.erase_region t ~off ~len ;
-    set_nb_free_sectors t (nb_free_sectors t - nb)
+    let* () = Sector.erase_region t ~off ~len in
+    let* t_nb_free_sectors = nb_free_sectors t in
+    assert (t_nb_free_sectors - nb > 0) ;
+    set_nb_free_sectors t (t_nb_free_sectors - nb)
 
   let shift_left_children t nb =
     let off = schema.children.Schema.location in
     let len = nb * schema.children.Schema.size_of_thing in
-    Sector.erase_region t ~off ~len ;
-    set_nb_children t (nb_children t - nb)
+    let* () = Sector.erase_region t ~off ~len in
+    let* t_nb_children = nb_children t in
+    assert (t_nb_children - nb > 0) ;
+    set_nb_children t (t_nb_children - nb)
 
   let rec do_pop_front t nb acc =
     assert (nb > 0) ;
-    let h = height t in
+    let* h = height t in
     if h = 0
     then begin
-      let len = nb_free_sectors t in
+      let* len = nb_free_sectors t in
       let stop = min len nb in
       let rec go i acc =
         if i >= stop
-        then acc
-        else (
-          let child_ptr = get_free_sector t i in
-          go (i + 1) (child_ptr :: acc))
+        then Lwt_result.return acc
+        else
+          let* child_ptr = get_free_sector t i in
+          go (i + 1) (child_ptr :: acc)
       in
-      let acc = go 0 acc in
+      let* acc = go 0 acc in
       if len <= nb
       then begin
-        set_nb_free_sectors t 0 ;
-        Lwt_result.return (acc, Underflow (nb - len))
+        let+ () = set_nb_free_sectors t 0 in
+        acc, Underflow (nb - len)
       end
       else begin
-        shift_left t nb ;
-        Lwt_result.return (acc, Ok_pop)
+        let+ () = shift_left t nb in
+        acc, Ok_pop
       end
     end
     else begin
-      let len = nb_children t in
+      let* len = nb_children t in
       let rec go i nb acc =
         assert (nb >= 0) ;
-        if nb = 0
+        if i >= len
+        then begin
+          let+ () = set_nb_children t 0 in
+          acc, Underflow nb
+        end
+        else if nb = 0
         then begin
           assert (i > 0) ;
-          shift_left_children t i ;
-          Lwt_result.return (acc, Ok_pop)
-        end
-        else if i >= len
-        then begin
-          set_nb_children t 0 ;
-          Lwt_result.return (acc, Underflow nb)
+          let+ () = shift_left_children t i in
+          acc, Ok_pop
         end
         else
           let* first = get_child t i in
           let* acc, res = do_pop_front first nb acc in
           match res with
           | Ok_pop ->
-            if i > 0 then shift_left_children t i ;
-            Lwt_result.return (acc, Ok_pop)
-          | Underflow rest -> go (i + 1) rest acc
+            let+ () = if i > 0 then shift_left_children t i else Lwt_result.return () in
+            acc, Ok_pop
+          | Underflow rest ->
+            Sector.drop_release first ;
+            go (i + 1) rest acc
       in
       go 0 nb acc
     end
@@ -220,7 +192,8 @@ module Make (B : Context.A_DISK) = struct
     let* acc, res = do_pop_front t nb [] in
     let+ t = push_discarded t in
     match res with
-    | Ok_pop | Underflow 0 -> t, acc
+    | Ok_pop -> t, acc
+    | Underflow 0 -> failwith "Underflow 0: Disk is full"
     | Underflow _ -> failwith "Disk is full"
 
   type q = Int64.t * t
@@ -246,26 +219,22 @@ module Make (B : Context.A_DISK) = struct
     in
     (Int64.add free_start (Int64.of_int easy_alloc), free_queue), head @ tail
 
-  (* let load_root ~free_start root = *)
-  (*   let+ free_queue = load_root root in *)
-  (*   free_start, free_queue *)
-
   let count_new (_, q) = Sector.count_new q
 
   let finalize (f, q) ids =
-    let ts, rest = Sector.finalize q ids in
+    let+ ts, rest = Sector.finalize q ids in
     assert (rest = []) ;
     match ts with
     | q :: _ -> (f, q), ts
     | [] -> failwith "empty?"
 
   let allocate ~free_queue sector =
-    let count = Sector.count_new sector in
+    let* count = Sector.count_new sector in
     if count = 0
     then Lwt_result.return (free_queue, [])
     else
-      let+ free_queue, allocated = pop_front free_queue count in
-      let to_flush, ids = Sector.finalize sector allocated in
+      let* free_queue, allocated = pop_front free_queue count in
+      let+ to_flush, ids = Sector.finalize sector allocated in
       assert (ids = []) ;
       free_queue, to_flush
 
@@ -276,23 +245,21 @@ module Make (B : Context.A_DISK) = struct
       assert (List.length new_allocated = count) ;
       let allocated = List.rev_append new_allocated allocated in
       assert (B.acquire_discarded () = []) ;
-      let new_count = count_new free_queue in
+      let* new_count = count_new free_queue in
       let allocated_count = List.length allocated in
       if allocated_count = new_count
-      then Lwt_result.return (finalize free_queue allocated)
+      then finalize free_queue allocated
       else if allocated_count < new_count
-      then begin
-        alloc_queue allocated (new_count - allocated_count) free_queue
-      end
+      then alloc_queue allocated (new_count - allocated_count) free_queue
       else begin
         let rec give_back ~free_queue allocated_count = function
           | [] -> assert false
           | id :: allocated ->
             let* free_queue = push_back free_queue [ id ] in
             let allocated_count = allocated_count - 1 in
-            let new_count = count_new free_queue in
+            let* new_count = count_new free_queue in
             if allocated_count = new_count
-            then Lwt_result.return (finalize free_queue allocated)
+            then finalize free_queue allocated
             else if allocated_count > new_count
             then give_back ~free_queue allocated_count allocated
             else alloc_queue allocated allocated_count free_queue
@@ -301,52 +268,16 @@ module Make (B : Context.A_DISK) = struct
       end
     in
     assert (B.acquire_discarded () = []) ;
-    let count = count_new free_queue in
+    let* count = count_new free_queue in
     if count > 0
     then alloc_queue [] count free_queue
     else Lwt_result.return (free_queue, [])
 
-  (*
-     let rec debug' ~indent t =
-    let my_id =
-      try Int64.to_string @@ Sector.force_id t with
-      | _ -> "<mem>"
-    in
-    let h = height t in
-    if h = 0
-    then begin
-      let len = nb_free_sectors t in
-      Format.printf "%sQLEAF %s (%i):" indent my_id len ;
-      for i = 0 to len - 1 do
-        Format.printf " %a" (Repr.pp Sector.id_t) (get_free_sector t i)
-      done ;
-      Format.printf "@." ;
-      Lwt_result.return ()
-    end
-    else begin
-      let len = nb_children t in
-      Format.printf "%sQNODE %s (%i):@." indent my_id len ;
-      let indent = indent ^ "| " in
-      let rec go i =
-        if i >= len
-        then Lwt_result.return ()
-        else
-          let* c = get_child t i in
-          let* () = debug' ~indent c in
-          go (i + 1)
-      in
-      go 0
-    end
-
-  let debug t = debug' ~indent:"" t
-
-  let debug (free_start, free_queue) =
-    Format.printf "QUEUE DEBUG: free_start=%s@." (Int64.to_string free_start) ;
-    debug free_queue
-  *)
   let load (free_start, ptr) =
-    let+ queue =
-      if Sector.is_null_ptr ptr then Lwt_result.return (create ()) else Sector.load ptr
-    in
+    let+ queue = if Sector.is_null_ptr ptr then create () else Sector.load ptr in
     free_start, queue
+
+  let make ~free_start =
+    let+ t = Sector.create () in
+    free_start, t
 end
