@@ -25,7 +25,11 @@ let input_contents =
   close_in h ;
   let result = Bytes.unsafe_to_string bytes in
   let t1 = Unix.gettimeofday () in
-  Format.printf "Unix read in %fs, %#i bytes@." (t1 -. t0) (String.length result) ;
+  Format.printf
+    "Unix read in %fs, %#i bytes, %#i sectors@."
+    (t1 -. t0)
+    (String.length result)
+    (String.length result / sector_size) ;
   result
 
 module Block = struct
@@ -53,6 +57,7 @@ let write ~fresh block =
   let* () = Fs.flush fs in
   let t1 = Unix.gettimeofday () in
   Format.printf "Write: %fs@." (t1 -. t0) ;
+  Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Fs.stats fs) ;
   Lwt.return ()
 
 let read fs =
@@ -65,6 +70,7 @@ let read fs =
   Format.printf "Read: %fs@." (t1 -. t0) ;
   let result = Bytes.unsafe_to_string bytes in
   assert (result = input_contents) ;
+  Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Fs.stats fs) ;
   Lwt.return ()
 
 let main ~fresh () =

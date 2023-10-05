@@ -9,6 +9,7 @@ module type A_DISK = sig
   module Id : Id.S
   module C : Checkseum.S
 
+  val stats : Stats.t
   val dirty : bool ref
 
   type read_error = private [> Mirage_block.error ]
@@ -52,6 +53,8 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : Checkseum.S) 
     module Id = (val Id.of_nb_pages info.size_sectors)
     module C = C
 
+    let stats = Stats.create ()
+
     type page =
       | Cstruct of Cstruct.t
       | On_disk of Id.t
@@ -79,11 +82,13 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : Checkseum.S) 
     let nb_sectors = info.size_sectors
 
     let read page_id cstruct =
+      Stats.incr_read stats 1 ;
       let page_id = Id.to_int64 page_id in
       let cstructs = [ cstruct ] in
       Lwt.map (Result.map_error (fun e -> `Read e)) @@ B.read disk page_id cstructs
 
     let write page_id cstructs =
+      Stats.incr_write stats (List.length cstructs) ;
       let page_id = Id.to_int64 page_id in
       Lwt.map (Result.map_error (fun e -> `Write e)) @@ B.write disk page_id cstructs
 

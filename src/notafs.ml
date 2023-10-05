@@ -1,9 +1,11 @@
 open Lwt_result.Syntax
-module Sector = Sector
+module Stats = Stats
 
 module type DISK = Context.DISK
 
 module type S = sig
+  module Disk : Context.A_DISK
+
   type t
   type error
   type 'a io := ('a, error) Lwt_result.t
@@ -28,6 +30,7 @@ module type S = sig
 end
 
 module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
+  module Disk = B
   module Sector = Sector.Make (B)
   module Root = Root.Make (B)
   module Queue = Queue.Make (B)
@@ -181,6 +184,8 @@ module Make (B : DISK) = struct
     let open Lwt_result.Syntax in
     let+ (t : S.t) = S.format () in
     T ((module S), t)
+
+  let stats (T ((module S), _)) = Stats.snapshot S.Disk.stats
 
   let of_block block =
     catch
