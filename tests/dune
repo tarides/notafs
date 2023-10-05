@@ -14,3 +14,12 @@
  (name block_viz)
  (modules block_viz)
  (libraries notafs graphics color unix))
+
+(executable
+ (name test_large_notafs)
+ (modules test_large_notafs)
+ (libraries
+  lwt
+  notafs
+  mirage-block-unix
+  mtime.clock.os))
