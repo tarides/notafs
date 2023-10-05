@@ -10,7 +10,7 @@ module Make (B : Context.A_DISK) : sig
   val load : unit -> t io
   val format : unit -> t io
   val update : t -> queue:Queue.q -> payload:Sector.t -> unit io
-  val get_free_queue : t -> (Int64.t * Sector.ptr) io
+  val get_free_queue : t -> (Sector.id * Sector.ptr) io
   val get_payload : t -> Sector.ptr io
   val flush : Sector.t list -> unit io
 end = struct
@@ -24,7 +24,7 @@ end = struct
   let rec regroup (first, last, cs, acc) = function
     | [] -> List.rev ((first, List.rev cs) :: acc)
     | (id, c) :: rest ->
-      if Int64.(equal (succ last) id)
+      if B.Id.(equal (succ last) id)
       then regroup (first, id, c :: cs, acc) rest
       else regroup (id, id, [ c ], (first, List.rev cs) :: acc) rest
 
@@ -40,7 +40,7 @@ end = struct
 
   let regroup lst =
     let+ lst = list_to_write [] lst in
-    regroup @@ List.sort (fun (a_id, _) (b_id, _) -> Int64.compare a_id b_id) lst
+    regroup @@ List.sort (fun (a_id, _) (b_id, _) -> B.Id.compare a_id b_id) lst
 
   let rec flush = function
     | [] -> Lwt_result.return ()
@@ -54,7 +54,7 @@ end = struct
 
   type schema =
     { generation : int64 Schema.field
-    ; free_start : int64 Schema.field
+    ; free_start : Sector.id Schema.field
     ; free_queue : Schema.ptr
     ; payload : Schema.ptr
     }
@@ -64,7 +64,7 @@ end = struct
     @@
     let open Schema.Syntax in
     let+ generation = Schema.uint64
-    and+ free_start = Schema.uint64
+    and+ free_start = Schema.id
     and+ free_queue = Schema.ptr
     and+ payload = Schema.ptr in
     { generation; free_start; free_queue; payload }
@@ -98,7 +98,7 @@ end = struct
       if i >= nb
       then Lwt_result.return (List.rev acc)
       else
-        let* generation = Sector.load_root (Int64.of_int i) in
+        let* generation = Sector.load_root (B.Id.of_int i) in
         load_gens (i + 1) (generation :: acc)
     in
     let* generations = load_gens 0 [] in
@@ -107,11 +107,11 @@ end = struct
     { generation; generations }
 
   let format () =
-    let free_start = Int64.of_int nb in
+    let free_start = B.Id.of_int nb in
     let generation = Int64.of_int 0 in
     let* generations =
       let create_gen i =
-        let i = Int64.of_int i in
+        let i = B.Id.of_int i in
         let* s = Sector.create ~at:(Sector.root_loc i) () in
         let* () = set_generation s Int64.zero in
         let* () = set_free_start s free_start in

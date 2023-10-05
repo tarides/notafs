@@ -196,7 +196,7 @@ module Make (B : Context.A_DISK) = struct
     | Underflow 0 -> failwith "Underflow 0: Disk is full"
     | Underflow _ -> failwith "Disk is full"
 
-  type q = Int64.t * t
+  type q = Sector.id * t
 
   let push_back (free_start, free_queue) lst =
     let* free_queue = push_back_list free_queue lst in
@@ -208,16 +208,18 @@ module Make (B : Context.A_DISK) = struct
     free_start, free_queue
 
   let pop_front (free_start, free_queue) quantity =
-    let easy_alloc = min quantity Int64.(to_int (sub B.nb_sectors free_start)) in
+    let easy_alloc =
+      min quantity Int64.(to_int (sub B.nb_sectors (B.Id.to_int64 free_start)))
+    in
     assert (easy_alloc >= 0) ;
     let rest_alloc = quantity - easy_alloc in
-    let head = List.init easy_alloc (fun i -> Int64.add free_start (Int64.of_int i)) in
+    let head = List.init easy_alloc (fun i -> B.Id.add free_start i) in
     let+ free_queue, tail =
       if rest_alloc <= 0
       then Lwt_result.return (free_queue, [])
       else pop_front free_queue rest_alloc
     in
-    (Int64.add free_start (Int64.of_int easy_alloc), free_queue), head @ tail
+    (B.Id.add free_start easy_alloc, free_queue), head @ tail
 
   let count_new (_, q) = Sector.count_new q
 

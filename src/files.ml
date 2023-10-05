@@ -44,7 +44,7 @@ module Make (B : Context.A_DISK) = struct
     files_count + on_disk_count
 
   let rec flush_ropes (files, to_flush, allocated) = function
-    | [] -> Lwt_result.return (files, to_flush, allocated)
+    | [] -> Lwt_result.return (List.rev files, to_flush, allocated)
     | (filename, rope) :: rest ->
       let* to_flush', allocated =
         if Sector.is_in_memory !rope

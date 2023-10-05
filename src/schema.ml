@@ -94,7 +94,7 @@ module Make (B : Context.A_DISK) = struct
 
   type id = (Sector.id, Sector.id) bifield
 
-  let id : id t = make Sector.id_size Sector.get_uint64 Sector.set_uint64
+  let id : id t = make Sector.id_size Sector.read_id Sector.write_id
 
   type ptr = (Sector.ptr, Sector.ptr) bifield
 

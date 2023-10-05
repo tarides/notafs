@@ -5,11 +5,8 @@ module type DISK = sig
   val flush : t -> unit
 end
 
-type page =
-  | Cstruct of Cstruct.t
-  | On_disk of Int64.t
-
 module type A_DISK = sig
+  module Id : Id.S
   module C : Checkseum.S
 
   val dirty : bool ref
@@ -29,12 +26,12 @@ module type A_DISK = sig
 
   val cstruct : sector Lru.elt -> (Cstruct.t, [> `Read of read_error ]) Lwt_result.t
   val cstruct_in_memory : sector Lru.elt -> Cstruct.t
-  val read : Int64.t -> Cstruct.t -> (unit, [> `Read of read_error ]) Lwt_result.t
-  val write : Int64.t -> Cstruct.t list -> (unit, [> `Write of write_error ]) Lwt_result.t
-  val discard : Int64.t -> unit
-  val acquire_discarded : unit -> Int64.t list
+  val read : Id.t -> Cstruct.t -> (unit, [> `Read of read_error ]) Lwt_result.t
+  val write : Id.t -> Cstruct.t list -> (unit, [> `Write of write_error ]) Lwt_result.t
+  val discard : Id.t -> unit
+  val acquire_discarded : unit -> Id.t list
   val flush : unit -> unit
-  val allocator : (int -> (Int64.t list, error) Lwt_result.t) ref
+  val allocator : (int -> (Id.t list, error) Lwt_result.t) ref
   val safe_lru : bool ref
   val allocate : from:[ `Root | `Load ] -> unit -> (sector Lru.elt, error) Lwt_result.t
   val unallocate : sector Lru.elt -> unit
@@ -42,9 +39,7 @@ module type A_DISK = sig
   val set_finalize
     :  sector
     -> (unit
-        -> ( (int * (Int64.t -> (unit, error) Lwt_result.t), Int64.t) result
-           , error )
-           Lwt_result.t)
+        -> ((int * (Id.t -> (unit, error) Lwt_result.t), Id.t) result, error) Lwt_result.t)
     -> unit
 end
 
@@ -54,7 +49,12 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : Checkseum.S) 
   let open Lwt.Syntax in
   let+ info = B.get_info disk in
   (module struct
+    module Id = (val Id.of_nb_pages info.size_sectors)
     module C = C
+
+    type page =
+      | Cstruct of Cstruct.t
+      | On_disk of Id.t
 
     let dirty = ref false
 
@@ -70,7 +70,7 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : Checkseum.S) 
       { mutable cstruct : page
       ; mutable finalize :
           unit
-          -> ( (int * (Int64.t -> (unit, error) Lwt_result.t), Int64.t) result
+          -> ( (int * (Id.t -> (unit, error) Lwt_result.t), Id.t) result
              , error )
              Lwt_result.t
       }
@@ -79,16 +79,19 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : Checkseum.S) 
     let nb_sectors = info.size_sectors
 
     let read page_id cstruct =
+      let page_id = Id.to_int64 page_id in
       let cstructs = [ cstruct ] in
       Lwt.map (Result.map_error (fun e -> `Read e)) @@ B.read disk page_id cstructs
 
     let write page_id cstructs =
+      let page_id = Id.to_int64 page_id in
       Lwt.map (Result.map_error (fun e -> `Write e)) @@ B.write disk page_id cstructs
 
     let discarded = ref []
 
     let discard page_id =
       discarded := page_id :: !discarded ;
+      let page_id = Id.to_int64 page_id in
       B.discard disk page_id
 
     let acquire_discarded () =
@@ -117,7 +120,7 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : Checkseum.S) 
     let rec regroup (first, last, cs, acc) = function
       | [] -> List.rev ((first, List.rev cs) :: acc)
       | (id, c) :: rest ->
-        if Int64.(equal (succ last) id)
+        if Id.(equal (succ last) id)
         then regroup (first, id, c :: cs, acc) rest
         else regroup (id, id, [ c ], (first, List.rev cs) :: acc) rest
 
@@ -126,7 +129,7 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : Checkseum.S) 
       | (id, c) :: rest -> regroup (id, id, [ c ], []) rest
 
     let regroup lst =
-      regroup @@ List.sort (fun (a_id, _) (b_id, _) -> Int64.compare a_id b_id) lst
+      regroup @@ List.sort (fun (a_id, _) (b_id, _) -> Id.compare a_id b_id) lst
 
     let rec write_all = function
       | [] -> Lwt_result.return ()
@@ -201,7 +204,7 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : Checkseum.S) 
                    let* () = read page_id fake_cstruct in
                    if not (Cstruct.to_string cstruct = Cstruct.to_string fake_cstruct)
                    then begin
-                   Format.printf "===== SECTOR %s =====@." (Int64.to_string page_id) ;
+                   Format.printf "===== SECTOR %s =====@." (Id.to_string page_id) ;
                    Format.printf "EXPECTED %S@." (Cstruct.to_string cstruct) ;
                    Format.printf "     GOT %S@." (Cstruct.to_string fake_cstruct) ;
                    failwith "inconsistent"

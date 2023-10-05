@@ -1,11 +1,11 @@
 module Make (B : Context.A_DISK) : sig
   module Sector : module type of Sector.Make (B)
 
-  type q = Int64.t * Sector.t
+  type q = Sector.id * Sector.t
   type 'a r := ('a, B.error) Lwt_result.t
 
-  val make : free_start:Int64.t -> q r
-  val load : Int64.t * Sector.ptr -> q r
+  val make : free_start:Sector.id -> q r
+  val load : Sector.id * Sector.ptr -> q r
   val push_back : q -> Sector.id list -> q r
   val push_discarded : q -> q r
   val pop_front : q -> int -> (q * Sector.id list) r

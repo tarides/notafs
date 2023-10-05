@@ -1,5 +1,5 @@
 module Make (B : Context.A_DISK) : sig
-  type id = Int64.t
+  type id = B.Id.t
 
   val id_size : int
   val id_t : id Repr.t
@@ -22,7 +22,7 @@ module Make (B : Context.A_DISK) : sig
   type loc
   type 'a r := ('a, B.error) Lwt_result.t
 
-  val root_loc : Int64.t -> loc
+  val root_loc : id -> loc
   val create : ?at:loc -> unit -> t r
   val load_root : id -> t r
   val load : ptr -> t r
@@ -36,6 +36,8 @@ module Make (B : Context.A_DISK) : sig
   val set_uint32 : t -> int -> int -> unit r
   val get_uint64 : t -> int -> Int64.t r
   val set_uint64 : t -> int -> Int64.t -> unit r
+  val read_id : t -> int -> id r
+  val write_id : t -> int -> id -> unit r
   val get_child : t -> int -> t r
   val set_child : t -> int -> t -> unit r
   val get_child_ptr : t -> int -> ptr r
@@ -59,9 +61,9 @@ end = struct
 
   module C = B.C
 
-  type id = Int64.t
+  type id = B.Id.t
 
-  let id_t : id Repr.t = Repr.int64
+  let id_t : id Repr.t = B.Id.t
 
   type loc =
     | Root of id
@@ -105,12 +107,12 @@ end = struct
     | In_memory -> invalid_arg "Sector.to_ptr: not allocated"
     | Freed -> invalid_arg "Sector.to_ptr: freed"
 
-  let null_id = Int64.zero
+  let null_id = B.Id.of_int 0
+  let id_size = B.Id.byte_size
   let null_cs = C.default
-  let id_size = 8
   let cs_size = 4
   let ptr_size = id_size + cs_size
-  let is_null_id id = Int64.equal null_id id
+  let is_null_id id = B.Id.equal null_id id
   let is_null_cs cs = C.equal null_cs cs
   let null_ptr = Disk (null_id, null_cs)
 
@@ -171,7 +173,7 @@ end = struct
     | Disk (ptr, cs) ->
       let* () = release t in
       let+ cstruct = rw_cstruct t in
-      Cstruct.HE.set_uint64 cstruct offset ptr ;
+      B.Id.write cstruct offset ptr ;
       set_checksum cstruct offset cs ;
       begin
         match H.find_opt t.children offset with
@@ -182,7 +184,7 @@ end = struct
       let* () = release t in
       assert (is_in_memory t) ;
       let+ cstruct = rw_cstruct t in
-      Cstruct.HE.set_uint64 cstruct offset null_id ;
+      B.Id.write cstruct offset null_id ;
       set_checksum cstruct offset null_cs ;
       begin
         match H.find_opt t.children offset with
@@ -229,8 +231,8 @@ end = struct
            with
            | Not_found -> ()) ;
           let+ parent_cstruct = ro_cstruct parent in
-          let ptr = Cstruct.HE.get_uint64 parent_cstruct offset in
-          assert (Int64.equal ptr page_id) ;
+          let ptr = B.Id.read parent_cstruct offset in
+          assert (B.Id.equal ptr page_id) ;
           let cs = read_checksum parent_cstruct offset in
           assert (C.equal cs (Option.get t.checksum))
       in
@@ -340,6 +342,10 @@ end = struct
     let+ cstruct = ro_cstruct t in
     Cstruct.HE.get_uint64 cstruct offset
 
+  let read_id t offset =
+    let+ cstruct = ro_cstruct t in
+    B.Id.read cstruct offset
+
   let set_uint8 t offset v =
     let* () = release t in
     let+ cstruct = rw_cstruct t in
@@ -360,12 +366,17 @@ end = struct
     let+ cstruct = rw_cstruct t in
     Cstruct.HE.set_uint64 cstruct offset v
 
+  let write_id t offset v =
+    let* () = release t in
+    let+ cstruct = rw_cstruct t in
+    B.Id.write cstruct offset v
+
   let get_child_ptr t offset =
     match H.find t.children offset with
     | v -> Lwt_result.return (Mem v)
     | exception Not_found ->
       let+ cstruct = ro_cstruct t in
-      let id = Cstruct.HE.get_uint64 cstruct offset in
+      let id = B.Id.read cstruct offset in
       let cs = read_checksum cstruct offset in
       Disk (id, cs)
 
@@ -491,9 +502,9 @@ end = struct
         | Freed -> failwith "Sector.finalize: freed children"
         | Root id | At id ->
           let* t_cstruct = ro_cstruct t in
-          let prev = Cstruct.HE.get_uint64 t_cstruct offset in
+          let prev = B.Id.read t_cstruct offset in
           let prev_cs = read_checksum t_cstruct offset in
-          assert (Int64.equal prev id) ;
+          assert (B.Id.equal prev id) ;
           let prev_acc, prev_ids = acc, ids in
           let+ child_id, child_cs, acc, ids = finalize child ids acc in
           assert (id = child_id) ;
@@ -504,12 +515,12 @@ end = struct
         | In_memory ->
           let* () = release t in
           let* t_cstruct = rw_cstruct t in
-          let prev = Cstruct.HE.get_uint64 t_cstruct offset in
-          assert (Int64.equal prev null_id) ;
+          let prev = B.Id.read t_cstruct offset in
+          assert (B.Id.equal prev null_id) ;
           let+ child_id, child_cs, acc, ids = finalize child ids acc in
           assert (At child_id = child.id) ;
           assert (Some child_cs = child.checksum) ;
-          Cstruct.HE.set_uint64 t_cstruct offset child_id ;
+          B.Id.write t_cstruct offset child_id ;
           set_checksum t_cstruct offset child_cs ;
           ids, acc)
       (ids, acc)
