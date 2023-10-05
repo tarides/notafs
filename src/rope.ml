@@ -39,14 +39,14 @@ module Make (B : Context.A_DISK) = struct
       let+ () = set_length t 0 in
       t
 
-    let append t (str, i) =
+    let append t (str, i, str_len) =
       let max_len = max_length t in
       let* len = get_length t in
       let capacity = max_len - len in
       if capacity <= 0
       then Lwt_result.return (t, Rest i)
       else begin
-        let rest = String.length str - i in
+        let rest = str_len - i in
         let quantity = min rest capacity in
         let* () = Sector.blit_from_string str i t (header_size + len) quantity in
         let+ () = set_length t (len + quantity) in
@@ -95,22 +95,22 @@ module Make (B : Context.A_DISK) = struct
 
   let load ptr = if Sector.is_null_ptr ptr then create () else Sector.load ptr
 
-  let rec do_append t (str, i) =
-    assert (i < String.length str) ;
+  let rec do_append t (str, i, str_len) =
+    assert (i < str_len) ;
     let* height = get_height t in
     if height = 0
-    then Leaf.append t (str, i)
+    then Leaf.append t (str, i, str_len)
     else begin
       let* len = get_nb_children t in
       assert (len > 0) ;
       let last_index = len - 1 in
       let* last_child = get_child t last_index in
-      let* last_child', res = do_append last_child (str, i) in
+      let* last_child', res = do_append last_child (str, i, str_len) in
       assert (last_child' == last_child) ;
       match res with
       | Ok ->
         let* key_last_index = get_key t last_index in
-        let* () = set_key t last_index (key_last_index + String.length str - i) in
+        let* () = set_key t last_index (key_last_index + str_len - i) in
         Lwt_result.return (t, Ok)
       | Rest i' when i = i' ->
         (* no progress, child is full *)
@@ -122,16 +122,16 @@ module Make (B : Context.A_DISK) = struct
           let* () = set_child t len leaf in
           let* key_last_index = get_key t last_index in
           let* () = set_key t len key_last_index in
-          do_append t (str, i)
+          do_append t (str, i, str_len)
         end
       | Rest i' ->
         let* key_last_index = get_key t last_index in
         let* () = set_key t last_index (key_last_index + i' - i) in
-        do_append t (str, i')
+        do_append t (str, i', str_len)
     end
 
-  let rec append_from t (str, i) =
-    let* t', res = do_append t (str, i) in
+  let rec append_from t (str, i, str_len) =
+    let* t', res = do_append t (str, i, str_len) in
     assert (t == t') ;
     match res with
     | Ok -> Lwt_result.return t
@@ -143,9 +143,9 @@ module Make (B : Context.A_DISK) = struct
       let* key = size t in
       let* () = set_child root 0 t in
       let* () = set_key root 0 key in
-      append_from root (str, i)
+      append_from root (str, i, str_len)
 
-  let append t str = append_from t (str, 0)
+  let append t str = append_from t (str, 0, String.length str)
 
   let rec blit_to_bytes ~depth t i bytes j n =
     let* height = get_height t in
@@ -228,23 +228,23 @@ module Make (B : Context.A_DISK) = struct
       assert (!n = 0)
     end
 
-  let blit_from_string t i bytes j n =
+  let blit_from_string t i str j n =
     let* len = size t in
     if i + n <= len
     then
-      let+ () = blit_from_string t i bytes j n in
+      let+ () = blit_from_string t i str j n in
       t
     else
       let* rest =
         if i < len
         then begin
           let m = len - i in
-          let+ () = blit_from_string t i bytes j m in
-          String.sub bytes (j + m) (n - m)
+          let+ () = blit_from_string t i str j m in
+          j + m
         end
-        else Lwt_result.return bytes
+        else Lwt_result.return j
       in
-      append t rest
+      append_from t (str, rest, j + n)
 
   let to_string rope =
     let* len = size rope in

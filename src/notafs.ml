@@ -17,7 +17,7 @@ module type S = sig
   val filename : file -> string
   val size : file -> int io
   val mem : t -> string -> bool
-  val append_substring : t -> file -> string -> off:int -> len:int -> unit io
+  val append_substring : file -> string -> off:int -> len:int -> unit io
   val blit_from_string : t -> file -> off:int -> len:int -> string -> unit io
   val blit_to_bytes : file -> off:int -> len:int -> bytes -> int io
   val rename : t -> src:string -> dst:string -> unit io
@@ -96,20 +96,9 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
 
   let filename t = fst t
 
-  let append _t (_filename, rope) str =
-    let+ t_rope = Rope.append !rope str in
+  let append_substring (_filename, rope) str ~off ~len =
+    let+ t_rope = Rope.append_from !rope (str, off, off + len) in
     rope := t_rope
-
-  let append_substring t filename str ~off ~len =
-    let str =
-      if off = 0 && len = String.length str
-      then str
-      else begin
-        (* TODO *)
-        String.sub str off len
-      end
-    in
-    append t filename str
 
   let rename t ~src ~dst =
     let+ files = Files.rename t.files ~src ~dst in
@@ -152,6 +141,7 @@ end
 
 module Make (B : DISK) = struct
   module C = Checkseum.Crc32c
+
   let debug = false
 
   type t = T : (module S with type t = 'a) * 'a -> t
@@ -260,11 +250,11 @@ module Make (B : DISK) = struct
     if debug then Format.printf "Notafs.rename@." ;
     or_fail @@ X.rename t ~src ~dst
 
-  let append_substring (File ((module X), t, file)) str ~off ~len =
+  let append_substring (File ((module X), _, file)) str ~off ~len =
     catch
     @@ fun () ->
     if debug then Format.printf "Notafs.append_substring@." ;
-    or_fail @@ X.append_substring t file str ~off ~len
+    or_fail @@ X.append_substring file str ~off ~len
 
   let blit_to_bytes (File ((module X), _, file)) ~off ~len bytes =
     catch
