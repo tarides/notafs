@@ -2,6 +2,7 @@ open Lwt_result.Syntax
 module Stats = Stats
 
 module type DISK = Context.DISK
+module type CHECKSUM = Context.CHECKSUM
 
 module type S = sig
   module Disk : Context.A_DISK
@@ -142,9 +143,7 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
   type file = Files.file
 end
 
-module Make (B : DISK) = struct
-  module C = Checkseum.Crc32c
-
+module Make_check (Check : CHECKSUM) (B : DISK) = struct
   let debug = false
 
   type t = T : (module S with type t = 'a) * 'a -> t
@@ -177,7 +176,7 @@ module Make (B : DISK) = struct
     catch
     @@ fun () ->
     if debug then Format.printf "Notafs.format@." ;
-    let* (module A_disk) = Context.of_impl (module B) (module C) block in
+    let* (module A_disk) = Context.of_impl (module B) (module Check) block in
     let (module S) = (module Make_disk (A_disk) : S) in
     or_fail
     @@
@@ -191,7 +190,7 @@ module Make (B : DISK) = struct
     catch
     @@ fun () ->
     if debug then Format.printf "Notafs.of_block@." ;
-    let* (module A_disk) = Context.of_impl (module B) (module C) block in
+    let* (module A_disk) = Context.of_impl (module B) (module Check) block in
     let (module S) = (module Make_disk (A_disk) : S) in
     or_fail
     @@
@@ -284,3 +283,15 @@ module Make (B : DISK) = struct
     if debug then Format.printf "Notafs.size: %i@." r ;
     r
 end
+
+module No_checksum = struct
+  type t = unit
+
+  let equal = ( = )
+  let default = ()
+  let digest_bigstring _ _ _ _ = ()
+  let to_int32 _ = Int32.zero
+  let of_int32 _ = ()
+end
+
+module Make (B : DISK) = Make_check (Checkseum.Crc32c) (B)

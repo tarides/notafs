@@ -5,9 +5,19 @@ module type DISK = sig
   val flush : t -> unit
 end
 
+module type CHECKSUM = sig
+  type t
+
+  val equal : t -> t -> bool
+  val default : t
+  val to_int32 : t -> Int32.t
+  val of_int32 : Int32.t -> t
+  val digest_bigstring : Checkseum.bigstring -> int -> int -> t -> t
+end
+
 module type A_DISK = sig
   module Id : Id.S
-  module C : Checkseum.S
+  module C : CHECKSUM
 
   val stats : Stats.t
   val dirty : bool ref
@@ -44,7 +54,7 @@ module type A_DISK = sig
     -> unit
 end
 
-let of_impl (type t) (module B : DISK with type t = t) (module C : Checkseum.S) (disk : t)
+let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (disk : t)
   : (module A_DISK) Lwt.t
   =
   let open Lwt.Syntax in
