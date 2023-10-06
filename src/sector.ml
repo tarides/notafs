@@ -482,9 +482,15 @@ end = struct
 
   let rec finalize t ids acc =
     let* ids, acc = finalize_children t ids acc in
-    let+ cstruct = ro_cstruct t in
-    let cs = get_checksum cstruct in
-    t.checksum <- Some cs ;
+    let+ cs =
+      match t.checksum with
+      | Some cs -> Lwt_result.return cs
+      | None ->
+        let+ cstruct = ro_cstruct t in
+        let cs = get_checksum cstruct in
+        t.checksum <- Some cs ;
+        cs
+    in
     begin
       match t.id, ids with
       | In_memory, id :: ids ->
@@ -501,16 +507,17 @@ end = struct
         match child.id with
         | Freed -> failwith "Sector.finalize: freed children"
         | Root id | At id ->
-          let* t_cstruct = ro_cstruct t in
-          let prev = B.Id.read t_cstruct offset in
-          let prev_cs = read_checksum t_cstruct offset in
-          assert (B.Id.equal prev id) ;
           let prev_acc, prev_ids = acc, ids in
+          let prev_child_cs =
+            match child.checksum with
+            | Some cs -> cs
+            | None -> failwith "child has no checksum"
+          in
           let+ child_id, child_cs, acc, ids = finalize child ids acc in
           assert (id = child_id) ;
           assert (acc == prev_acc) ;
           assert (ids == prev_ids) ;
-          assert (child_cs == prev_cs) ;
+          assert (C.equal child_cs prev_child_cs) ;
           ids, acc
         | In_memory ->
           let* () = release t in
