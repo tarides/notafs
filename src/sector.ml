@@ -49,6 +49,7 @@ module Make (B : Context.A_DISK) : sig
   (* *)
   val count_new : t -> int r
   val finalize : t -> id list -> (t list * id list) r
+  val verify_checksum : t -> unit r
   val drop_release : t -> unit
   val is_in_memory : t -> bool
 end = struct
@@ -402,12 +403,7 @@ end = struct
 
   let load = function
     | Disk (id, cs) ->
-      let* cstruct = read ~from:`Load id in
-      let+ cs' =
-        let+ cstruct = B.cstruct cstruct in
-        get_checksum cstruct
-      in
-      assert (C.equal cs cs') ;
+      let+ cstruct = read ~from:`Load id in
       let t =
         { id = At id
         ; cstruct
@@ -426,12 +422,7 @@ end = struct
     match child with
     | Mem child -> Lwt_result.return child
     | Disk (id, cs) ->
-      let* cstruct = read ~from:`Load id in
-      let+ cs' =
-        let+ cstruct = B.cstruct cstruct in
-        get_checksum cstruct
-      in
-      assert (C.equal cs cs') ;
+      let+ cstruct = read ~from:`Load id in
       let child =
         { id = At id
         ; cstruct
@@ -540,6 +531,22 @@ end = struct
     let+ _, _, ts, ids' = finalize t ids [] in
     assert (List.length ids' + e = List.length ids) ;
     ts, ids'
+
+  let verify_checksum t =
+    match t.id, t.checksum with
+    | At id, Some cs ->
+      (let* cs' =
+      let+ cstruct = B.cstruct t.cstruct in
+      get_checksum cstruct
+      in
+      let+ () =
+        if (C.equal cs cs')
+        then (Lwt_result.return ())
+        else (Lwt_result.fail (`Invalid_checksum id))
+      in
+      ())
+    | In_memory, None -> Lwt_result.return ()
+    | _ -> assert false
 
   let force_id t =
     match t.id with

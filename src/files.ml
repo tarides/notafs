@@ -99,6 +99,11 @@ module Make (B : Context.A_DISK) = struct
       let+ files = of_disk_repr on_disk in
       { on_disk; files; dirty = false }
 
+  let verify_checksum t =
+    let seq = (M.to_seq t.files) in
+    let seq = Seq.map (fun (_, rope) () -> Rope.verify_checksum !rope) seq in
+    Seq.fold_left Lwt_result.bind (Lwt_result.return ()) seq
+
   let mem t filename = M.mem filename t.files
   let find t filename = M.find filename t.files
   let find_opt t filename = M.find_opt filename t.files

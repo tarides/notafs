@@ -13,6 +13,7 @@ module Make (B : Context.A_DISK) : sig
   val get_free_queue : t -> (Sector.id * Sector.ptr) io
   val get_payload : t -> Sector.ptr io
   val flush : Sector.t list -> unit io
+  val pred_gen : t -> unit
 end = struct
   module Schema = Schema.Make (B)
   module Sector = Schema.Sector
@@ -132,7 +133,7 @@ end = struct
     let generations = Array.of_list generations in
     { generation; generations }
 
-  let current_idx t = Int64.rem t.generation (Int64.of_int (Array.length t.generations))
+  let current_idx t = Int64.rem t.generation (Int64.of_int nb)
   let current t = t.generations.(Int64.to_int (current_idx t))
 
   let update t ~queue:(new_free_start, new_free_root) ~payload =
@@ -152,4 +153,7 @@ end = struct
     free_start, queue
 
   let get_payload t = get_payload (current t)
+
+  let pred_gen t =
+    t.generation <- Int64.pred t.generation
 end

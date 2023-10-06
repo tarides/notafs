@@ -279,6 +279,30 @@ module Make (B : Context.A_DISK) = struct
     let+ queue = if Sector.is_null_ptr ptr then create () else Sector.load ptr in
     free_start, queue
 
+  let verify_checksum (_, ptr) =
+    let rec verify_queue queue =
+      let* () = Sector.verify_checksum queue in
+      let* height = height queue in
+      if height > 0
+      then
+        (
+        let* nb_children = nb_children queue in
+        let rec check_child i =
+          if i > nb_children - 1
+          then
+            Lwt_result.return ()
+          else
+            let* queue = get_child queue i in
+            let* () = verify_queue queue in
+            check_child (i + 1)
+        in
+        check_child 0
+        )
+      else
+        Lwt_result.return ()
+    in
+    verify_queue ptr
+
   let make ~free_start =
     let+ t = Sector.create () in
     free_start, t

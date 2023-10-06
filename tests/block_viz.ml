@@ -4,6 +4,7 @@ module Make (B : Mirage_block.S) : sig
   val draw_status : t -> string -> unit
   val of_block : B.t -> t Lwt.t
   val sleep : float ref
+  val pause : bool ref
 end = struct
   type bitmap = int array array
 
@@ -190,7 +191,9 @@ end = struct
   let disconnect t = B.disconnect t.block
   let sleep = ref 0.
 
-  let pause () =
+  let pause = ref false
+
+  let do_pause () =
     let exception Resume in
     try
       while true do
@@ -207,11 +210,13 @@ end = struct
     refresh t ;
     while Graphics.key_pressed () do
       match Graphics.read_key () with
-      | ' ' | 'p' ->
-        Fmt.pr "Graphics: pause execution@." ;
-        pause ()
+      | ' '
+      | 'p' ->
+        Fmt.pr "Graphics: pause execution@.";
+        do_pause ()
       | _ -> ()
-    done ;
+    done;
+    if !pause then do_pause ();
     let w, _ = t.size in
     G.set_color G.white ;
     G.fill_rect 0 0 w (border_bottom - 15) ;

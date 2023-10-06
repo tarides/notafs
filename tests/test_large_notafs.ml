@@ -35,6 +35,22 @@ let input_contents =
 module Block = struct
   include Block
 
+  (* let read t i l =
+    let len = List.length l in
+    let i' = Int64.to_int i in
+    if i' + len > 6 && i' <= 6
+    then
+      Fmt.pr "reading sector 6@.";
+    read t i l
+
+  let write t i l =
+    if List.length l > 5
+    then
+      (let s = List.nth l 4 in
+      Fmt.pr "corrupting sector %a@." Fmt.int64 (Int64.add 4L i);
+      Cstruct.set_uint8 s 345 13);
+    write t i l *)
+
   let discard _ _ = ()
   let flush _ = ()
 end
@@ -79,6 +95,9 @@ module Test (Check : Notafs.CHECKSUM) = struct
     let* () = write ~fresh block in
     let* () = Block.disconnect block in
     let* block = connect () in
+    (* let* () = write ~fresh:false block in
+    let* () = Block.disconnect block in
+    let* block = connect () in *)
     let* fs = Fs.of_block block in
     let* () = read fs in
     Block.disconnect block

@@ -6,6 +6,7 @@ module Make (B : Context.A_DISK) : sig
 
   val make : free_start:Sector.id -> q r
   val load : Sector.id * Sector.ptr -> q r
+  val verify_checksum : q -> unit r
   val push_back : q -> Sector.id list -> q r
   val push_discarded : q -> q r
   val pop_front : q -> int -> (q * Sector.id list) r

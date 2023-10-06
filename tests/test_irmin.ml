@@ -74,17 +74,20 @@ let main ~fresh () =
   Io.notafs_flush () ;
   disconnect block ;
   (*
-     let with_store fn =
+  let with_store fn =
     let block = connect root in
     let () = Lwt_direct.direct @@ fun () -> Io.init block in
     let repo = Store.Repo.v (Store.config ~fresh:false "/") in
     let main = Store.main repo in
-    Fun.protect
-      (fun () -> fn repo main)
-      ~finally:(fun () ->
-        Store.Repo.close repo ;
-        disconnect block)
-  in
+    Fun.protect (fun () -> fn repo main) ~finally:(fun () -> Store.Repo.close repo; disconnect block)
+    in *)
+  (*
+     let () = Lwt_direct.direct @@ fun () -> Io.init block in
+     let repo = Store.Repo.v (Store.config ~fresh:false "/") in
+     let with_store fn =
+       let main = Store.main repo in
+       fn repo main
+     in
   *)
   let block = connect root in
   let () = Lwt_direct.direct @@ fun () -> Io.init block in
@@ -161,14 +164,19 @@ let sleep =
   Arg.(
     value & opt float (0.) & info [ "s"; "sleep" ] ~docv:"sleep" ~doc:"sleep time in seconds")
 
-let main sleep =
+let pause =
+  Arg.(
+    value & opt bool (false) & info [ "p"; "pause" ] ~docv:"pause" ~doc:"automatically trigger a pause")
+
+let main sleep pause =
   B.sleep := sleep;
+  B.pause := pause;
   Lwt_main.run
   @@ Lwt_direct.indirect
   @@ fun () -> Eio_mock.Backend.run @@ main ~fresh:true
 
 let main_cmd =
   let info = Cmd.info "graphics" in
-  Cmd.v info Term.(const main $ sleep)
+  Cmd.v info Term.(const main $ sleep $ pause)
 
 let () = exit (Cmd.eval ~catch:false main_cmd)
