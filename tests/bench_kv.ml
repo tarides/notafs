@@ -100,7 +100,7 @@ end
 
 module Notafs_kv = Notafs.KV (Block)
 module Test_notafs = Test (Notafs_kv)
-module Notafs_kv_crc = Notafs.Make_kv (Notafs.Crc32c) (Block)
+module Notafs_kv_crc = Notafs.Make_kv (Notafs.Adler32) (Block)
 module Test_notafs_crc = Test (Notafs_kv_crc)
 module Tar_kv = Tar_mirage.Make_KV_RW (Pclock) (Block)
 module Test_tar = Test (Tar_kv)

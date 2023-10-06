@@ -320,15 +320,15 @@ module No_checksum = struct
   let write _ _ _ = ()
 end
 
-module Crc32c = struct
-  include Checkseum.Crc32c
+module Adler32 = struct
+  include Checkseum.Adler32
 
   let byte_size = 8
   let read cstruct offset = of_int32 @@ Cstruct.HE.get_uint32 cstruct offset
   let write cstruct offset v = Cstruct.HE.set_uint32 cstruct offset (to_int32 v)
 end
 
-module Make (B : DISK) = Make_check (Crc32c) (B)
+module Make (B : DISK) = Make_check (Adler32) (B)
 
 module Make_kv (Check : CHECKSUM) (Block : DISK) : sig
   include Mirage_kv.RW
