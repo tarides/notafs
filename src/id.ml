@@ -1,9 +1,16 @@
-module type S = sig
-  type t [@@deriving repr]
+module type FIELD = sig
+  type t
 
   val byte_size : int
   val read : Cstruct.t -> int -> t
   val write : Cstruct.t -> int -> t -> unit
+end
+
+module type S = sig
+  type t [@@deriving repr]
+
+  include FIELD with type t := t
+
   val to_string : t -> string
   val of_int : int -> t
   val of_int64 : Int64.t -> t

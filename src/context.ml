@@ -13,6 +13,8 @@ module type CHECKSUM = sig
   val to_int32 : t -> Int32.t
   val of_int32 : Int32.t -> t
   val digest_bigstring : Checkseum.bigstring -> int -> int -> t -> t
+
+  include Id.FIELD with type t := t
 end
 
 module type A_DISK = sig

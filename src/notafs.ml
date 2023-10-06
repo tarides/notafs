@@ -292,6 +292,17 @@ module No_checksum = struct
   let digest_bigstring _ _ _ _ = ()
   let to_int32 _ = Int32.zero
   let of_int32 _ = ()
+  let byte_size = 0
+  let read _ _ = ()
+  let write _ _ _ = ()
 end
 
-module Make (B : DISK) = Make_check (Checkseum.Crc32c) (B)
+module Crc32c = struct
+  include Checkseum.Crc32c
+
+  let byte_size = 8
+  let read cstruct offset = of_int32 @@ Cstruct.HE.get_uint32 cstruct offset
+  let write cstruct offset v = Cstruct.HE.set_uint32 cstruct offset (to_int32 v)
+end
+
+module Make (B : DISK) = Make_check (Crc32c) (B)
