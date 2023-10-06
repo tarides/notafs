@@ -111,7 +111,7 @@ end = struct
   let null_id = B.Id.of_int 0
   let id_size = B.Id.byte_size
   let null_cs = C.default
-  let cs_size = 4
+  let cs_size = C.byte_size
   let ptr_size = id_size + cs_size
   let is_null_id id = B.Id.equal null_id id
   let is_null_cs cs = C.equal null_cs cs
@@ -124,12 +124,8 @@ end = struct
   let get_checksum cstruct =
     C.digest_bigstring (Cstruct.to_bigarray cstruct) 0 B.page_size C.default
 
-  let set_checksum cstruct offset cs =
-    Cstruct.HE.set_uint32 cstruct (offset + id_size) (C.to_int32 cs)
-
-  let read_checksum t_cstruct offset =
-    C.of_int32 @@ Cstruct.HE.get_uint32 t_cstruct (offset + id_size)
-
+  let set_checksum cstruct offset cs = C.write cstruct (offset + id_size) cs
+  let read_checksum cstruct offset = C.read cstruct (offset + id_size)
   let root_loc i = Root i
 
   let is_in_memory t =
@@ -493,6 +489,11 @@ end = struct
     end
 
   and finalize_children t ids acc =
+    let children =
+      List.sort (fun (i, _) (j, _) -> Int.compare i j)
+      @@ List.of_seq
+      @@ H.to_seq t.children
+    in
     lwt_result_fold
       (fun (ids, acc) (offset, child) ->
         match child.id with
@@ -522,9 +523,7 @@ end = struct
           set_checksum t_cstruct offset child_cs ;
           ids, acc)
       (ids, acc)
-      (List.sort (fun (i, _) (j, _) -> Int.compare i j)
-       @@ List.of_seq
-       @@ H.to_seq t.children)
+      children
 
   let finalize t ids =
     let* e = count_new t in

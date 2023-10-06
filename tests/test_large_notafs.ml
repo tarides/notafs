@@ -106,7 +106,7 @@ module Test (Check : Notafs.CHECKSUM) = struct
 end
 
 module Test_nocheck = Test (Notafs.No_checksum)
-module Test_crc32c = Test (Checkseum.Crc32c)
+module Test_crc32c = Test (Notafs.Crc32c)
 
 let () =
   Format.printf "--- without checksum:@." ;

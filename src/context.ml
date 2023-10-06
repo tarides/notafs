@@ -13,6 +13,8 @@ module type CHECKSUM = sig
   val to_int32 : t -> Int32.t
   val of_int32 : Int32.t -> t
   val digest_bigstring : Checkseum.bigstring -> int -> int -> t -> t
+
+  include Id.FIELD with type t := t
 end
 
 module type A_DISK = sig
@@ -133,8 +135,8 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
 
     (* let max_lru_size = 100_000_000 *)
     (* let min_lru_size = max_lru_size - 128 *)
-    let max_lru_size = 128
-    let min_lru_size = 64
+    let max_lru_size = 1024
+    let min_lru_size = max_lru_size / 2
 
     let rec regroup (first, last, cs, acc) = function
       | [] -> List.rev ((first, List.rev cs) :: acc)

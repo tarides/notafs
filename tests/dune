@@ -16,6 +16,16 @@
  (libraries notafs graphics color unix))
 
 (executable
+ (name bench_kv)
+ (modules bench_kv)
+ (libraries
+  lwt
+  notafs
+  mirage-block-unix
+  mirage-clock-unix
+  tar-mirage))
+
+(executable
  (name test_large_notafs)
  (modules test_large_notafs)
  (libraries

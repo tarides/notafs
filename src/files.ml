@@ -141,4 +141,19 @@ module Make (B : Context.A_DISK) = struct
   let blit_from_string _t (_filename, rope) ~off ~len str =
     let+ t = Rope.blit_from_string !rope off str 0 len in
     rope := t
+
+  let list t prefix =
+    let prefix = prefix ^ "/" in
+    let prefix_len = String.length prefix in
+    List.sort_uniq Stdlib.compare
+    @@ List.filter_map (fun (filename, _) ->
+      if not (String.starts_with ~prefix filename)
+      then None
+      else (
+        match String.index_from_opt filename prefix_len '/' with
+        | None -> Some (filename, `Value)
+        | Some offset ->
+          let dirname = String.sub filename prefix_len (offset - prefix_len - 1) in
+          Some (dirname, `Dictionary)))
+    @@ M.bindings t.files
 end
