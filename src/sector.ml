@@ -498,6 +498,11 @@ end = struct
     end
 
   and finalize_children t ids acc =
+    let children =
+      List.sort (fun (i, _) (j, _) -> Int.compare i j)
+      @@ List.of_seq
+      @@ H.to_seq t.children
+    in
     lwt_result_fold
       (fun (ids, acc) (offset, child) ->
         match child.id with
@@ -527,9 +532,7 @@ end = struct
           set_checksum t_cstruct offset child_cs ;
           ids, acc)
       (ids, acc)
-      (List.sort (fun (i, _) (j, _) -> Int.compare i j)
-       @@ List.of_seq
-       @@ H.to_seq t.children)
+      children
 
   let finalize t ids =
     let* e = count_new t in

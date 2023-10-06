@@ -28,6 +28,7 @@ module type S = sig
   val replace : t -> string -> string -> unit io
   val remove : t -> string -> unit io
   val find_opt : t -> string -> file option
+  val list : t -> string -> (string * [ `Value | `Dictionary ]) list
 end
 
 module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
@@ -141,6 +142,8 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
     | Some file -> Some (filename, file)
 
   type file = Files.file
+
+  let list t prefix = Files.list t.files prefix
 end
 
 module Make_check (Check : CHECKSUM) (B : DISK) = struct
@@ -306,3 +309,153 @@ module Crc32c = struct
 end
 
 module Make (B : DISK) = Make_check (Crc32c) (B)
+
+module Make_kv (Check : CHECKSUM) (Block : DISK) : sig
+  include Mirage_kv.RW
+
+  val format : Block.t -> (t, write_error) Lwt_result.t
+  val flush : t -> (unit, write_error) Lwt_result.t
+  val stats : t -> Stats.ro
+end = struct
+  type block_error =
+    [ `Read of Block.error
+    | `Write of Block.write_error
+    ]
+
+  type error =
+    [ Mirage_kv.error
+    | Mirage_kv.write_error
+    | block_error
+    | `Unsupported_operation of string
+    | `Disk_failed
+    ]
+
+  let pp_error h = function
+    | #Mirage_kv.error as e -> Mirage_kv.pp_error h e
+    | #Mirage_kv.write_error as e -> Mirage_kv.pp_write_error h e
+    | `Unsupported_operation msg -> Format.fprintf h "Unsupported_operation %S" msg
+    | `Disk_failed -> Format.fprintf h "Disk_failed"
+    | `Read e -> Block.pp_error h e
+    | `Write e -> Block.pp_write_error h e
+
+  type write_error = error
+
+  let pp_write_error = pp_error
+
+  let lift_error lwt =
+    let open Lwt.Syntax in
+    let+ r = lwt in
+    match r with
+    | Error _ -> Error `Disk_failed
+    | Ok v -> Ok v
+
+  type t = T : (module S with type t = 'a) * 'a -> t
+
+  let format block =
+    let open Lwt.Syntax in
+    let* (module A_disk) = Context.of_impl (module Block) (module Check) block in
+    let (module S) = (module Make_disk (A_disk) : S) in
+    let open Lwt_result.Syntax in
+    let+ (t : S.t) = lift_error @@ S.format () in
+    T ((module S), t)
+
+  let flush (T ((module X), t)) = lift_error @@ X.flush t
+
+  type key = Mirage_kv.Key.t
+
+  let exists (T ((module X), t)) key =
+    let filename = Mirage_kv.Key.to_string key in
+    match X.find_opt t filename with
+    | None -> Lwt.return_ok None
+    | Some _ -> Lwt.return_ok (Some `Value)
+
+  let get (T ((module X), t)) key =
+    let filename = Mirage_kv.Key.to_string key in
+    match X.find_opt t filename with
+    | None -> Lwt_result.fail (`Not_found key)
+    | Some file ->
+      let* size = lift_error @@ X.size file in
+      let bytes = Bytes.create size in
+      let+ quantity = lift_error @@ X.blit_to_bytes file bytes ~off:0 ~len:size in
+      assert (quantity = size) ;
+      Bytes.unsafe_to_string bytes
+
+  let get_partial (T ((module X), t)) key ~offset ~length =
+    let filename = Mirage_kv.Key.to_string key in
+    match X.find_opt t filename with
+    | None -> Lwt_result.fail (`Not_found key)
+    | Some file ->
+      let* size = lift_error @@ X.size file in
+      let off = Optint.Int63.to_int offset in
+      assert (off >= 0) ;
+      assert (off + length <= size) ;
+      let bytes = Bytes.create length in
+      let+ quantity = lift_error @@ X.blit_to_bytes file bytes ~off ~len:length in
+      assert (quantity = size) ;
+      Bytes.unsafe_to_string bytes
+
+  let list (T ((module X), t)) key =
+    let filename = Mirage_kv.Key.to_string key in
+    let lst =
+      List.map
+        (fun (filename, kind) -> Mirage_kv.Key.( / ) key filename, kind)
+        (X.list t filename)
+    in
+    Lwt.return_ok lst
+
+  let size (T ((module X), t)) key =
+    let filename = Mirage_kv.Key.to_string key in
+    match X.find_opt t filename with
+    | None -> Lwt_result.fail (`Not_found key)
+    | Some file ->
+      let+ size = lift_error @@ X.size file in
+      Optint.Int63.of_int size
+
+  let allocate (T ((module X), t)) key ?last_modified:_ size =
+    let filename = Mirage_kv.Key.to_string key in
+    match X.find_opt t filename with
+    | Some _ -> Lwt_result.fail (`Already_present key)
+    | None ->
+      let size = Optint.Int63.to_int size in
+      let contents = String.make size '\000' in
+      let+ _ = lift_error @@ X.touch t filename contents in
+      ()
+
+  let set (T ((module X), t)) key contents =
+    let filename = Mirage_kv.Key.to_string key in
+    let* () =
+      match X.find_opt t filename with
+      | None -> Lwt_result.return ()
+      | Some _ -> lift_error @@ X.remove t filename
+    in
+    let* _ = lift_error @@ X.touch t filename contents in
+    lift_error @@ X.flush t
+
+  let set_partial (T ((module X), t)) key ~offset contents =
+    let filename = Mirage_kv.Key.to_string key in
+    match X.find_opt t filename with
+    | None -> Lwt_result.fail (`Not_found key)
+    | Some file ->
+      let off = Optint.Int63.to_int offset in
+      let len = String.length contents in
+      let* _ = lift_error @@ X.blit_from_string t file ~off ~len contents in
+      lift_error @@ X.flush t
+
+  let remove (T ((module X), t)) key =
+    let filename = Mirage_kv.Key.to_string key in
+    let* () = lift_error @@ X.remove t filename in
+    lift_error @@ X.flush t
+
+  let rename (T ((module X), t)) ~source ~dest =
+    let src = Mirage_kv.Key.to_string source in
+    let dst = Mirage_kv.Key.to_string dest in
+    let* () = lift_error @@ X.rename t ~src ~dst in
+    lift_error @@ X.flush t
+
+  let last_modified _ _ = Lwt_result.fail (`Unsupported_operation "last_modified")
+  let digest _ _ = Lwt_result.fail (`Unsupported_operation "digest")
+  let disconnect _ = Lwt.return_unit
+  let stats (T ((module S), _)) = Stats.snapshot S.Disk.stats
+end
+
+module KV (Block : DISK) = Make_kv (No_checksum) (Block)

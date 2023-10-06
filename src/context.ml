@@ -131,8 +131,8 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
 
     (* let max_lru_size = 100_000_000 *)
     (* let min_lru_size = max_lru_size - 128 *)
-    let max_lru_size = 128
-    let min_lru_size = 64
+    let max_lru_size = 1024
+    let min_lru_size = max_lru_size / 2
 
     let rec regroup (first, last, cs, acc) = function
       | [] -> List.rev ((first, List.rev cs) :: acc)
