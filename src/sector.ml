@@ -18,7 +18,6 @@ module Make (B : Context.A_DISK) : sig
   val force_id : t -> id
   val to_ptr : t -> ptr
 
-  (* val unsafe_set_id : t -> id -> unit *)
   type loc
   type 'a r := ('a, B.error) Lwt_result.t
 
@@ -178,11 +177,8 @@ end = struct
         | Some child -> assert (child.id = At ptr)
       end
     | Mem child ->
-      let* () = release t in
+      let+ () = release t in
       assert (is_in_memory t) ;
-      let+ cstruct = rw_cstruct t in
-      B.Id.write cstruct offset null_id ;
-      set_checksum cstruct offset null_cs ;
       begin
         match H.find_opt t.children offset with
         | None -> H.replace t.children offset child
@@ -201,12 +197,12 @@ end = struct
         then begin
           assert (t.parent = Detached) ;
           assert (t.depth = 0) ;
-          t.depth <- child.depth - 1 (* reset_depth ~depth:t.depth child *)
+          t.depth <- child.depth - 1
         end
         else begin
           assert (H.length child.children = 0) ;
           assert (child.depth = 0) ;
-          child.depth <- t.depth + 1 (* reset_depth ~depth:t.depth child *)
+          child.depth <- t.depth + 1
         end
       | _ -> failwith "set_child: would lose parent"
     end ;
@@ -512,13 +508,11 @@ end = struct
           assert (C.equal child_cs prev_child_cs) ;
           ids, acc
         | In_memory ->
-          let* () = release t in
-          let* t_cstruct = rw_cstruct t in
-          let prev = B.Id.read t_cstruct offset in
-          assert (B.Id.equal prev null_id) ;
-          let+ child_id, child_cs, acc, ids = finalize child ids acc in
+          let* child_id, child_cs, acc, ids = finalize child ids acc in
           assert (At child_id = child.id) ;
           assert (Some child_cs = child.checksum) ;
+          let* () = release t in
+          let+ t_cstruct = rw_cstruct t in
           B.Id.write t_cstruct offset child_id ;
           set_checksum t_cstruct offset child_cs ;
           ids, acc)
