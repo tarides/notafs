@@ -19,8 +19,10 @@
     mirage-kv
     repr
     ppx_repr
+    (mirage-block-unix :with-test)
+    (tar-mirage :with-test)
     (graphics :with-test)
-    (mirage-block-unix :with-test)))
+    (color :with-test)))
 
 (package
   (name lwt_direct)

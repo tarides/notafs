@@ -15,8 +15,10 @@ depends: [
   "mirage-kv"
   "repr"
   "ppx_repr"
-  "graphics" {with-test}
   "mirage-block-unix" {with-test}
+  "tar-mirage" {with-test}
+  "graphics" {with-test}
+  "color" {with-test}
   "odoc" {with-doc}
 ]
 build: [
