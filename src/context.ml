@@ -97,12 +97,52 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
 
     let page_size = info.sector_size
     let nb_sectors = info.size_sectors
+    let concurrent_reads = ref []
+
+    let rec regroup (first, last, cs, acc) = function
+      | [] -> List.rev ((first, List.rev cs) :: acc)
+      | (id, c) :: rest ->
+        if Id.(equal (succ last) id)
+        then regroup (first, id, c :: cs, acc) rest
+        else regroup (id, id, [ c ], (first, List.rev cs) :: acc) rest
+
+    let regroup = function
+      | [] -> invalid_arg "Root.regroup: empty list"
+      | (id, c) :: rest -> regroup (id, id, [ c ], []) rest
+
+    let regroup lst =
+      regroup @@ List.sort (fun (a_id, _) (b_id, _) -> Id.compare a_id b_id) lst
 
     let read page_id cstruct =
-      Stats.incr_read stats 1 ;
-      let page_id = Id.to_int64 page_id in
-      let cstructs = [ cstruct ] in
-      Lwt.map (Result.map_error (fun e -> `Read e)) @@ B.read disk page_id cstructs
+      let is_done, set_done = Lwt.wait () in
+      let is_done =
+        let+ r = is_done in
+        match r with
+        | Ok () -> Ok ()
+        | Error e -> Error (`Read e)
+      in
+      concurrent_reads := (page_id, (cstruct, set_done)) :: !concurrent_reads ;
+      let* () = Lwt.pause () in
+      begin
+        match !concurrent_reads with
+        | [] -> is_done
+        | to_read ->
+          concurrent_reads := [] ;
+          let groups = regroup to_read in
+          let* () =
+            Lwt_list.iter_p
+              (fun (page_id, cstructs_complete) ->
+                let cstructs = List.map fst cstructs_complete in
+                let page_id = Id.to_int64 page_id in
+                Stats.incr_read stats (List.length cstructs) ;
+                let+ r = B.read disk page_id cstructs in
+                List.iter
+                  (fun (_, set_done) -> Lwt.wakeup_later set_done r)
+                  cstructs_complete)
+              groups
+          in
+          is_done
+      end
 
     let write page_id cstructs =
       Stats.incr_write stats (List.length cstructs) ;
@@ -144,20 +184,6 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
     (* let min_lru_size = max_lru_size - 128 *)
     let max_lru_size = 128
     let min_lru_size = max_lru_size / 2
-
-    let rec regroup (first, last, cs, acc) = function
-      | [] -> List.rev ((first, List.rev cs) :: acc)
-      | (id, c) :: rest ->
-        if Id.(equal (succ last) id)
-        then regroup (first, id, c :: cs, acc) rest
-        else regroup (id, id, [ c ], (first, List.rev cs) :: acc) rest
-
-    let regroup = function
-      | [] -> invalid_arg "Root.regroup: empty list"
-      | (id, c) :: rest -> regroup (id, id, [ c ], []) rest
-
-    let regroup lst =
-      regroup @@ List.sort (fun (a_id, _) (b_id, _) -> Id.compare a_id b_id) lst
 
     let rec write_all = function
       | [] -> Lwt_result.return ()

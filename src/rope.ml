@@ -64,6 +64,8 @@ module Make (B : Context.A_DISK) = struct
         assert (offs >= 0) ;
         assert (offs < len) ;
         assert (offs + quantity <= len) ;
+        assert (i >= 0) ;
+        assert (i + quantity <= Bytes.length bytes) ;
         let+ () = Sector.blit_to_bytes t (offs + header_size) bytes i quantity in
         quantity
       end
@@ -101,21 +103,17 @@ module Make (B : Context.A_DISK) = struct
       let* height = get_height t in
       if height > 0
       then
-        (
-          let* nb_children = get_nb_children t in
-          let rec check_child i =
-            if i > nb_children - 1
-            then
-              Lwt_result.return ()
-            else
-              let* t = get_child t i in
-              let* () = verify_rope t in
-              check_child (i + 1)
-          in
-          check_child 0
-        )
-      else
-        Lwt_result.return ()
+        let* nb_children = get_nb_children t in
+        let rec check_child i =
+          if i > nb_children - 1
+          then Lwt_result.return ()
+          else
+            let* t = get_child t i in
+            let* () = verify_rope t in
+            check_child (i + 1)
+        in
+        check_child 0
+      else Lwt_result.return ()
     in
     verify_rope t
 
@@ -172,6 +170,8 @@ module Make (B : Context.A_DISK) = struct
   let append t str = append_from t (str, 0, String.length str)
 
   let rec blit_to_bytes ~depth t i bytes j n =
+    assert (i >= 0) ;
+    assert (j >= 0) ;
     let* height = get_height t in
     assert (n >= 0) ;
     if n = 0
@@ -180,37 +180,40 @@ module Make (B : Context.A_DISK) = struct
     then Leaf.blit_to_bytes t i bytes j n
     else begin
       let requested_read_length = n in
-      let j = ref j in
-      let n = ref n in
       let* t_nb_children = get_nb_children t in
-      let rec go k =
-        if k >= t_nb_children || !n <= 0
-        then Lwt_result.return ()
+      let rec go k j n acc =
+        if k >= t_nb_children || n <= 0
+        then
+          let+ () = acc in
+          n
         else begin
           let* offs_stop = get_key t k in
-          let* () =
+          let* offs_start = if k = 0 then Lwt_result.return 0 else get_key t (k - 1) in
+          let len = offs_stop - offs_start in
+          assert (len >= 0) ;
+          let sub_i = max 0 (i - offs_start) in
+          let quantity = min n (len - sub_i) in
+          assert (quantity <= 0 = (i >= offs_stop)) ;
+          let j, n, acc =
             if i >= offs_stop
-            then Lwt_result.return ()
+            then j, n, acc
             else begin
-              let* offs_start =
-                if k = 0 then Lwt_result.return 0 else get_key t (k - 1)
+              let lwt =
+                let* child = get_child t k in
+                assert (sub_i >= 0) ;
+                let* q = blit_to_bytes ~depth:(depth + 1) child sub_i bytes j quantity in
+                assert (q = quantity) ;
+                acc
               in
-              let len = offs_stop - offs_start in
-              assert (len >= 0) ;
-              let sub_i = max 0 (i - offs_start) in
-              let quantity = min !n (len - sub_i) in
-              let* child = get_child t k in
-              let+ q = blit_to_bytes ~depth:(depth + 1) child sub_i bytes !j quantity in
-              assert (q = quantity) ;
-              j := !j + quantity ;
-              n := !n - quantity
+              j + quantity, n - quantity, lwt
             end
           in
-          go (k + 1)
+          go (k + 1) j n acc
         end
       in
-      let+ () = go 0 in
-      requested_read_length - !n
+      let+ rest = go 0 j n (Lwt_result.return ()) in
+      assert (rest >= 0) ;
+      requested_read_length - rest
     end
 
   let blit_to_bytes t i bytes j n = blit_to_bytes ~depth:0 t i bytes j n
