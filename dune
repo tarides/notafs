@@ -1,0 +1,6 @@
+(vendored_dirs vendor)
+(data_only_dirs unikernel-*)
+
+(env
+ (release
+  (flags (:standard -noassert))))
