@@ -1,6 +1,7 @@
-(executable
+(test
  (name test_irmin)
  (modules test_irmin)
+ (package irmin-pack-notafs)
  (libraries
   lwt
   eio.mock
@@ -15,9 +16,10 @@
  (modules block_viz)
  (libraries notafs graphics color unix))
 
-(executable
+(test
  (name bench_kv)
  (modules bench_kv)
+ (package notafs)
  (libraries
   lwt
   notafs
@@ -25,9 +27,10 @@
   mirage-clock-unix
   tar-mirage))
 
-(executable
+(test
  (name test_large_notafs)
  (modules test_large_notafs)
+ (package notafs)
  (libraries
   lwt
   notafs

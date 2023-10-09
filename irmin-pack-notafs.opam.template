@@ -1,5 +1,5 @@
 pin-depends: [
-  [ "irmin.dev"       "git+https://github.com/art-w/irmin#63e674c8885cea1720c6f171dfea6dbe91408df6" ]
-  [ "irmin-pack.dev"  "git+https://github.com/art-w/irmin#63e674c8885cea1720c6f171dfea6dbe91408df6" ]
-  [ "ppx_irmin.dev"   "git+https://github.com/art-w/irmin#63e674c8885cea1720c6f171dfea6dbe91408df6" ]
+  [ "irmin.dev"       "git+https://github.com/art-w/irmin#mirage-io" ]
+  [ "irmin-pack.dev"  "git+https://github.com/art-w/irmin#mirage-io" ]
+  [ "ppx_irmin.dev"   "git+https://github.com/art-w/irmin#mirage-io" ]
 ]
