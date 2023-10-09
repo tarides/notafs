@@ -42,7 +42,7 @@ let root = "/tmp/notafs-irmin"
 module Fs = Store.Maker.Fs
 module Io = Store.Maker.Io
 
-let main ~fresh () =
+let main ~fresh ~factor () =
   let is_connected = ref false in
   let connect path =
     Lwt_direct.direct
@@ -50,7 +50,7 @@ let main ~fresh () =
     let open Lwt.Syntax in
     assert (not !is_connected) ;
     let* r = Block.connect ~prefered_sector_size:(Some 1024) path in
-    let+ r = B.of_block r in
+    let+ r = B.of_block r ~factor in
     is_connected := true ;
     r
   in
@@ -117,7 +117,7 @@ let main ~fresh () =
       @@ fun repo _main ->
       (match Store.Gc.start_exn ~unlink:true repo commit with
        | status ->
-         Format.printf "GC run %d: %b@." !gc_run status ;
+        Format.printf "GC run %d: %b@." !gc_run status ;
          B.draw_status block (Printf.sprintf "garbage collect FINALISE") ;
          let _ = Store.Gc.finalise_exn ~wait:false repo in
          B.draw_status block (Printf.sprintf "garbage collect DONE") ;
@@ -168,15 +168,19 @@ let pause =
   Arg.(
     value & opt bool (false) & info [ "p"; "pause" ] ~docv:"pause" ~doc:"automatically trigger a pause")
 
-let main sleep pause =
+let factor =
+  Arg.(
+    value & opt int 1 & info [ "f"; "factor" ] ~docv:"factor" ~doc:"ui factor")
+
+let main sleep pause factor =
   B.sleep := sleep;
   B.pause := pause;
   Lwt_main.run
   @@ Lwt_direct.indirect
-  @@ fun () -> Eio_mock.Backend.run @@ main ~fresh:true
+  @@ fun () -> Eio_mock.Backend.run @@ main ~fresh:true ~factor
 
 let main_cmd =
   let info = Cmd.info "graphics" in
-  Cmd.v info Term.(const main $ sleep $ pause)
+  Cmd.v info Term.(const main $ sleep $ pause $ factor)
 
 let () = exit (Cmd.eval ~catch:false main_cmd)

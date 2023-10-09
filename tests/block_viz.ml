@@ -2,19 +2,30 @@ module Make (B : Mirage_block.S) : sig
   include Notafs.DISK
 
   val draw_status : t -> string -> unit
-  val of_block : B.t -> t Lwt.t
+  val of_block : ?factor:int -> B.t -> t Lwt.t
   val sleep : float ref
   val pause : bool ref
+  val do_pause : unit -> unit
 end = struct
   type bitmap = int array array
 
-  type t =
+  type vars =
+    { factor : int
+    ; true_size : int
+    ; size : int
+    ; border : int
+    ; border_bottom : int
+    ; size' : int
+    }
+
+    type t =
     { block : B.t
     ; mutable size : int * int
     ; nb_pages : int
     ; bitmaps : bitmap array
     ; write_count : int array
     ; read_count : int array
+    ; vars : vars
     }
 
   type error = B.error
@@ -47,20 +58,13 @@ end = struct
     assert (g <> G.transp) ;
     g
 
-  let factor = 1
-  let true_size = 32
-  let size = true_size * factor
-  let border = 2
-  let border_bottom = 100
-  let size' = size + border
-
   let draw_status t msg : unit =
     let w, _ = t.size in
     (* let w, h = G.text_size msg in *)
     G.set_color G.white ;
-    G.fill_rect 0 (border_bottom - 15) w 15 ;
+    G.fill_rect 0 (t.vars.border_bottom - 15) w 15 ;
     G.set_color G.black ;
-    G.moveto 10 (border_bottom - 15) ;
+    G.moveto 10 (t.vars.border_bottom - 15) ;
     G.draw_string msg
 
   let draw_image img x y =
@@ -74,9 +78,9 @@ end = struct
       t.size <- size ;
       G.clear_graph () ;
       for i = 0 to Array.length t.bitmaps - 1 do
-        let nb_horz = (w - border) / size' in
+        let nb_horz = (w - t.vars.border) / t.vars.size' in
         let x, y = i mod nb_horz, i / nb_horz in
-        let x, y = border + (x * size'), border_bottom + (y * size') in
+        let x, y = t.vars.border + (x * t.vars.size'), t.vars.border_bottom + (y * t.vars.size') in
         let img = t.bitmaps.(i) in
         draw_image img x y
       done
@@ -85,10 +89,10 @@ end = struct
   let refresh_write_count t =
     let worst = Array.fold_left max 0 t.write_count in
     let worst = max 10 worst in
-    let s = 4 in
+    let s = 4 * t.vars.factor in
     G.set_color G.black ;
     for i = 0 to Array.length t.write_count - 1 do
-      let height = 32 * t.write_count.(i) / worst in
+      let height = (32 * t.vars.factor) * t.write_count.(i) / worst in
       G.fill_rect (s * i) 0 s height
     done
 
@@ -96,11 +100,11 @@ end = struct
     let worst = Array.fold_left max 0 t.read_count in
     let worst = max 10 worst in
     let wrote = ref false in
-    let s = 4 in
+    let s = (4 * t.vars.factor) in
     G.set_color G.black ;
     for i = 0 to Array.length t.read_count - 1 do
-      let height = 32 * t.read_count.(i) / worst in
-      G.fill_rect (s * i) 34 s height ;
+      let height = (32 * t.vars.factor) * t.read_count.(i) / worst in
+      G.fill_rect (s * i) (34 * t.vars.factor) s height ;
       if (not !wrote) && t.read_count.(i) = worst
       then begin
         wrote := true ;
@@ -111,20 +115,24 @@ end = struct
 
   let draw_sector t i sector =
     let w, _ = t.size in
-    let nb_horz = (w - border) / size' in
+    let nb_horz = (w - t.vars.border) / t.vars.size' in
     let x, y = i mod nb_horz, i / nb_horz in
-    let x, y = border + (x * size'), border_bottom + (y * size') in
+    let x, y = t.vars.border + (x * t.vars.size'), t.vars.border_bottom + (y * t.vars.size') in
     let img = t.bitmaps.(i) in
-    for y = 0 to size - 1 do
-      for x = 0 to size - 1 do
-        let x, y = x / factor, y / factor in
-        let j = (y * true_size) + x in
+    for y = 0 to t.vars.size - 1 do
+      for x = 0 to t.vars.size - 1 do
+        let x, y = x / t.vars.factor, y / t.vars.factor in
+        let j = (y * t.vars.true_size) + x in
         let g =
           try Cstruct.get_uint8 sector j with
           | Invalid_argument _ -> 0
         in
-        img.(y).(x) <- colors.(g)
-      done
+        for y' = 0 to t.vars.factor - 1 do
+          for x' = 0 to t.vars.factor - 1 do
+            img.(y * t.vars.factor + y').(x * t.vars.factor + x') <- colors.(g)
+          done
+        done ;
+      done ;
     done ;
     draw_image img x y ;
     G.moveto x y ;
@@ -138,10 +146,10 @@ end = struct
 
   let draw_dead_sector t i =
     let w, _ = t.size in
-    let nb_horz = (w - border) / size' in
+    let nb_horz = (w - t.vars.border) / t.vars.size' in
     let i = Int32.to_int i in
     let x, y = i mod nb_horz, i / nb_horz in
-    let x, y = border + (x * size'), border_bottom + (y * size') in
+    let x, y = t.vars.border + (x * t.vars.size'), t.vars.border_bottom + (y * t.vars.size') in
     let arr = t.bitmaps.(i) in
     for y = 0 to Array.length arr - 1 do
       for x = 0 to Array.length arr.(y) - 1 do
@@ -174,15 +182,25 @@ end = struct
     G.clear_graph () ;
     at_exit (fun () -> G.close_graph ())
 
-  let of_block block =
+  let vars factor =
+    let factor = min 1 factor in
+    let true_size = 32 in
+    let size = true_size * factor in
+    let border = 2 in
+    let border_bottom = 64 * factor in
+    let size' = size + border in
+    { factor; true_size; size; border; border_bottom; size' }
+
+  let of_block ?(factor=1) block =
     let open Lwt.Syntax in
     let+ info = B.get_info block in
+    let vars = vars factor in
     let w, h = G.size_x (), G.size_y () in
     let nb_pages = Int64.to_int info.size_sectors in
-    let bitmaps = Array.init nb_pages (fun _ -> Array.make_matrix size size 0x555555) in
+    let bitmaps = Array.init nb_pages (fun _ -> Array.make_matrix vars.size vars.size 0x555555) in
     let write_count = Array.make nb_pages 0 in
     let read_count = Array.make nb_pages 0 in
-    let t = { block; size = w, h; nb_pages; bitmaps; write_count; read_count } in
+    let t = { block; size = w, h; nb_pages; bitmaps; write_count; read_count; vars } in
     for i = 0 to nb_pages - 1 do
       draw_dead_sector t (Int32.of_int i)
     done ;
@@ -219,7 +237,7 @@ end = struct
     if !pause then do_pause ();
     let w, _ = t.size in
     G.set_color G.white ;
-    G.fill_rect 0 0 w (border_bottom - 15) ;
+    G.fill_rect 0 0 w (t.vars.border_bottom - 15) ;
     refresh_write_count t ;
     refresh_read_count t ;
     G.synchronize () ;
