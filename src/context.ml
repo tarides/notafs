@@ -72,6 +72,7 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
     type page =
       | Cstruct of Cstruct.t
       | On_disk of Id.t
+      | Freed
 
     let dirty = ref false
 
@@ -96,12 +97,52 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
 
     let page_size = info.sector_size
     let nb_sectors = info.size_sectors
+    let concurrent_reads = ref []
+
+    let rec regroup (first, last, cs, acc) = function
+      | [] -> List.rev ((first, List.rev cs) :: acc)
+      | (id, c) :: rest ->
+        if Id.(equal (succ last) id)
+        then regroup (first, id, c :: cs, acc) rest
+        else regroup (id, id, [ c ], (first, List.rev cs) :: acc) rest
+
+    let regroup = function
+      | [] -> invalid_arg "Root.regroup: empty list"
+      | (id, c) :: rest -> regroup (id, id, [ c ], []) rest
+
+    let regroup lst =
+      regroup @@ List.sort (fun (a_id, _) (b_id, _) -> Id.compare a_id b_id) lst
 
     let read page_id cstruct =
-      Stats.incr_read stats 1 ;
-      let page_id = Id.to_int64 page_id in
-      let cstructs = [ cstruct ] in
-      Lwt.map (Result.map_error (fun e -> `Read e)) @@ B.read disk page_id cstructs
+      let is_done, set_done = Lwt.wait () in
+      let is_done =
+        let+ r = is_done in
+        match r with
+        | Ok () -> Ok ()
+        | Error e -> Error (`Read e)
+      in
+      concurrent_reads := (page_id, (cstruct, set_done)) :: !concurrent_reads ;
+      let* () = Lwt.pause () in
+      begin
+        match !concurrent_reads with
+        | [] -> is_done
+        | to_read ->
+          concurrent_reads := [] ;
+          let groups = regroup to_read in
+          let* () =
+            Lwt_list.iter_p
+              (fun (page_id, cstructs_complete) ->
+                let cstructs = List.map fst cstructs_complete in
+                let page_id = Id.to_int64 page_id in
+                Stats.incr_read stats (List.length cstructs) ;
+                let+ r = B.read disk page_id cstructs in
+                List.iter
+                  (fun (_, set_done) -> Lwt.wakeup_later set_done r)
+                  cstructs_complete)
+              groups
+          in
+          is_done
+      end
 
     let write page_id cstructs =
       Stats.incr_write stats (List.length cstructs) ;
@@ -124,33 +165,25 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
     let allocator = ref (fun _ -> failwith "no allocator")
     let lru = Lru.make ()
     let safe_lru = ref true
+    let available_cstructs = ref []
+    let release_cstructs cstructs = available_cstructs := cstructs :: !available_cstructs
 
     let unallocate elt =
+      let t = Lru.value elt in
       begin
-        match (Lru.value elt).cstruct with
-        | Cstruct _ -> ()
+        match t.cstruct with
+        | Cstruct cstruct ->
+          release_cstructs [ cstruct ] ;
+          t.cstruct <- Freed
         | On_disk _id -> failwith "Context.unallocate On_disk leak"
+        | Freed -> failwith "Context.unallocate Freed"
       end ;
       Lru.detach elt lru
 
     (* let max_lru_size = 100_000_000 *)
     (* let min_lru_size = max_lru_size - 128 *)
-    let max_lru_size = 1024
+    let max_lru_size = 128
     let min_lru_size = max_lru_size / 2
-
-    let rec regroup (first, last, cs, acc) = function
-      | [] -> List.rev ((first, List.rev cs) :: acc)
-      | (id, c) :: rest ->
-        if Id.(equal (succ last) id)
-        then regroup (first, id, c :: cs, acc) rest
-        else regroup (id, id, [ c ], (first, List.rev cs) :: acc) rest
-
-    let regroup = function
-      | [] -> invalid_arg "Root.regroup: empty list"
-      | (id, c) :: rest -> regroup (id, id, [ c ], []) rest
-
-    let regroup lst =
-      regroup @@ List.sort (fun (a_id, _) (b_id, _) -> Id.compare a_id b_id) lst
 
     let rec write_all = function
       | [] -> Lwt_result.return ()
@@ -199,12 +232,14 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
               begin
                 match s.cstruct with
                 | On_disk id' -> assert (id = id')
-                | Cstruct _ -> failwith "cstruct"
+                | Cstruct _ -> failwith "Context.finalize: Cstruct"
+                | Freed -> failwith "Context.finalize: Freed"
               end ;
               finalize ids ss
             | _ -> assert false
           in
           let+ () = finalize ids acc in
+          release_cstructs @@ List.map snd cstructs ;
           flush ()
         end
       end
@@ -214,6 +249,7 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
           | None -> assert false
           | Some old -> begin
             match old.cstruct with
+            | Freed -> failwith "Cstruct.lru_make_room: Freed"
             | On_disk _ -> Lwt_result.return acc
             | Cstruct _cstruct -> begin
               let* fin = old.finalize () in
@@ -238,9 +274,20 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
         in
         lru_make_room acc
 
+    let cstruct_create () =
+      match !available_cstructs with
+      | [] -> Cstruct.create page_size
+      | [ c ] :: css ->
+        available_cstructs := css ;
+        c
+      | [] :: _ -> assert false
+      | (c :: cs) :: css ->
+        available_cstructs := cs :: css ;
+        c
+
     let allocate ~from () =
       let sector =
-        { cstruct = Cstruct (Cstruct.create page_size)
+        { cstruct = Cstruct (cstruct_create ())
         ; finalize = (fun _ -> failwith "no finalizer")
         }
       in
@@ -268,15 +315,17 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
       let sector = Lru.value elt in
       match sector.cstruct with
       | Cstruct cstruct -> cstruct
-      | On_disk _ -> failwith "cstruct is not in memory"
+      | On_disk _ -> failwith "Context.cstruct_in_memory: On_disk"
+      | Freed -> failwith "Context.cstruct_in_memory: Freed"
 
     let cstruct elt =
       Lru.use elt lru ;
       let sector = Lru.value elt in
       match sector.cstruct with
+      | Freed -> failwith "Context.cstruct: Freed"
       | Cstruct cstruct -> Lwt_result.return cstruct
       | On_disk page_id ->
-        let cstruct = Cstruct.create page_size in
+        let cstruct = cstruct_create () in
         let open Lwt_result.Syntax in
         let+ () = read page_id cstruct in
         sector.cstruct <- Cstruct cstruct ;

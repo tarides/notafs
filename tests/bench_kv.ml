@@ -95,7 +95,11 @@ module Test (Kv : Mirage_kv.RW) = struct
 
   let main fs =
     let* () = write fs in
-    read fs
+    let* () = read fs in
+    let* () = read fs in
+    let* () = write fs in
+    let* () = read fs in
+    Lwt.return_unit
 end
 
 module Notafs_kv = Notafs.KV (Block)

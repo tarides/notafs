@@ -14,9 +14,13 @@
   (synopsis "Not a filesystem for MirageOS block devices")
   (depends
     (ocaml (>= "4.12.0"))
+    checkseum
     mirage-block
+    mirage-kv
     repr
-    ppx_repr))
+    ppx_repr
+    (graphics :with-test)
+    (mirage-block-unix :with-test)))
 
 (package
   (name lwt_direct)
