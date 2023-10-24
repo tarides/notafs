@@ -47,7 +47,7 @@ module Make (B : Context.A_DISK) : sig
 
   (* *)
   val count_new : t -> int r
-  val finalize : t -> id list -> (t list * id list) r
+  val finalize : t -> id list -> ((id * Cstruct.t) list * id list) r
   val verify_checksum : t -> unit r
   val drop_release : t -> unit
   val is_in_memory : t -> bool
@@ -70,6 +70,12 @@ end = struct
     | At of id
     | In_memory
     | Freed
+
+  let[@warning "-32"] string_of_loc = function
+    | Root id -> "(Root " ^ B.Id.to_string id ^ ")"
+    | At id -> "(At " ^ B.Id.to_string id ^ ")"
+    | In_memory -> "In_memory"
+    | Freed -> "Freed"
 
   type t =
     { mutable id : loc
@@ -207,7 +213,17 @@ end = struct
       | _ -> failwith "set_child: would lose parent"
     end ;
     child.parent <- Parent (t, offset) ;
-    set_child_ptr t offset (ptr_of_t child)
+    let ptr = ptr_of_t child in
+    let+ () = set_child_ptr t offset ptr in
+    begin
+      match ptr with
+      | Mem _ -> ()
+      | Disk _ -> begin
+        match H.find t.children offset with
+        | self -> assert (self == child)
+        | exception Not_found -> H.replace t.children offset child
+      end
+    end
 
   let finalize_set_id t () =
     match t.id with
@@ -218,11 +234,13 @@ end = struct
         match t.parent with
         | Detached -> Lwt_result.return ()
         | Parent (parent, offset) ->
-          (try
-             let self = H.find parent.children offset in
-             assert (self == t)
-           with
-           | Not_found -> ()) ;
+          begin
+            try
+              let self = H.find parent.children offset in
+              assert (self == t)
+            with
+            | Not_found -> ()
+          end ;
           let+ parent_cstruct = ro_cstruct parent in
           let ptr = B.Id.read parent_cstruct offset in
           assert (B.Id.equal ptr page_id) ;
@@ -288,10 +306,6 @@ end = struct
       B.unallocate t.cstruct ;
       t.id <- Freed
 
-  let set_child_ptr t offset v =
-    let* () = release t in
-    set_child_ptr t offset v
-
   let erase_region t ~off ~len =
     let* () = release t in
     let+ cstruct = rw_cstruct t in
@@ -312,6 +326,7 @@ end = struct
       | Some child ->
         let j = i - len in
         assert (not (H.mem t.children j)) ;
+        assert (not (H.mem t.children i)) ;
         H.remove t.children i ;
         H.replace t.children j child ;
         child.parent <- Parent (t, j)
@@ -465,7 +480,7 @@ end = struct
 
   let rec finalize t ids acc =
     let* ids, acc = finalize_children t ids acc in
-    let+ cs =
+    let* cs =
       match t.checksum with
       | Some cs -> Lwt_result.return cs
       | None ->
@@ -478,8 +493,17 @@ end = struct
       match t.id, ids with
       | In_memory, id :: ids ->
         t.id <- At id ;
-        id, cs, t :: acc, ids
-      | (Root id | At id), _ -> id, cs, acc, ids
+        let+ cstruct = ro_cstruct t in
+        begin
+          match t.parent with
+          | Detached -> ()
+          | Parent (parent, offset) ->
+            assert (H.find parent.children offset == t) ;
+            H.remove parent.children offset
+        end ;
+        B.set_id t.cstruct id ;
+        id, cs, (id, cstruct) :: acc, ids
+      | (Root id | At id), _ -> Lwt_result.return (id, cs, acc, ids)
       | Freed, _ -> invalid_arg "Sector.finalize: freed"
       | In_memory, [] -> invalid_arg "Sector.finalize: empty list"
     end
@@ -490,34 +514,41 @@ end = struct
       @@ List.of_seq
       @@ H.to_seq t.children
     in
-    lwt_result_fold
-      (fun (ids, acc) (offset, child) ->
-        match child.id with
-        | Freed -> failwith "Sector.finalize: freed children"
-        | Root id | At id ->
-          let prev_acc, prev_ids = acc, ids in
-          let prev_child_cs =
-            match child.checksum with
-            | Some cs -> cs
-            | None -> failwith "child has no checksum"
-          in
-          let+ child_id, child_cs, acc, ids = finalize child ids acc in
-          assert (id = child_id) ;
-          assert (acc == prev_acc) ;
-          assert (ids == prev_ids) ;
-          assert (C.equal child_cs prev_child_cs) ;
-          ids, acc
-        | In_memory ->
-          let* child_id, child_cs, acc, ids = finalize child ids acc in
-          assert (At child_id = child.id) ;
-          assert (Some child_cs = child.checksum) ;
-          let* () = release t in
-          let+ t_cstruct = rw_cstruct t in
-          B.Id.write t_cstruct offset child_id ;
-          set_checksum t_cstruct offset child_cs ;
-          ids, acc)
-      (ids, acc)
-      children
+    let+ result =
+      lwt_result_fold
+        (fun (ids, acc) (offset, child) ->
+          match child.id with
+          | Freed -> failwith "Sector.finalize: freed children"
+          | Root id | At id ->
+            let prev_acc, prev_ids = acc, ids in
+            let prev_child_cs =
+              match child.checksum with
+              | Some cs -> cs
+              | None -> failwith "child has no checksum"
+            in
+            let+ child_id, child_cs, acc, ids = finalize child ids acc in
+            assert (id = child_id) ;
+            assert (acc == prev_acc) ;
+            assert (ids == prev_ids) ;
+            assert (C.equal child_cs prev_child_cs) ;
+            B.set_id child.cstruct id ;
+            H.remove t.children offset ;
+            ids, acc
+          | In_memory ->
+            let* child_id, child_cs, acc, ids = finalize child ids acc in
+            assert (At child_id = child.id) ;
+            assert (Some child_cs = child.checksum) ;
+            assert (not (H.mem t.children offset)) ;
+            let* () = release t in
+            let+ t_cstruct = rw_cstruct t in
+            B.Id.write t_cstruct offset child_id ;
+            set_checksum t_cstruct offset child_cs ;
+            ids, acc)
+        (ids, acc)
+        children
+    in
+    assert (H.length t.children = 0) ;
+    result
 
   let finalize t ids =
     let* e = count_new t in
@@ -528,16 +559,11 @@ end = struct
   let verify_checksum t =
     match t.id, t.checksum with
     | At id, Some cs ->
-      (let* cs' =
-      let+ cstruct = B.cstruct t.cstruct in
-      get_checksum cstruct
-      in
-      let+ () =
-        if (C.equal cs cs')
-        then (Lwt_result.return ())
-        else (Lwt_result.fail (`Invalid_checksum id))
-      in
-      ())
+      let* cstruct = ro_cstruct t in
+      let cs' = get_checksum cstruct in
+      if C.equal cs cs'
+      then Lwt_result.return ()
+      else Lwt_result.fail (`Invalid_checksum id)
     | In_memory, None -> Lwt_result.return ()
     | _ -> assert false
 

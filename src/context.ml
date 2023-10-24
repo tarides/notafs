@@ -39,6 +39,8 @@ module type A_DISK = sig
 
   type sector
 
+  val set_id : sector Lru.elt -> Id.t -> unit
+  val lru : sector Lru.t
   val cstruct : sector Lru.elt -> (Cstruct.t, [> `Read of read_error ]) Lwt_result.t
   val cstruct_in_memory : sector Lru.elt -> Cstruct.t
   val read : Id.t -> Cstruct.t -> (unit, [> `Read of read_error ]) Lwt_result.t
@@ -147,7 +149,9 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
     let write page_id cstructs =
       Stats.incr_write stats (List.length cstructs) ;
       let page_id = Id.to_int64 page_id in
-      Lwt.map (Result.map_error (fun e -> `Write e)) @@ B.write disk page_id cstructs
+      let open Lwt.Syntax in
+      let+ result = B.write disk page_id cstructs in
+      Result.map_error (fun e -> `Write e) result
 
     let discarded = ref []
 
@@ -175,13 +179,23 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
         | Cstruct cstruct ->
           release_cstructs [ cstruct ] ;
           t.cstruct <- Freed
-        | On_disk _id -> failwith "Context.unallocate On_disk leak"
+        | On_disk _id -> ()
         | Freed -> failwith "Context.unallocate Freed"
       end ;
       Lru.detach elt lru
 
-    (* let max_lru_size = 100_000_000 *)
-    (* let min_lru_size = max_lru_size - 128 *)
+    let set_id elt id =
+      let t = Lru.value elt in
+      begin
+        match t.cstruct with
+        | Cstruct cstruct ->
+          release_cstructs [ cstruct ] ;
+          t.cstruct <- On_disk id
+        | On_disk id' -> assert (Id.equal id id')
+        | Freed -> failwith "Context.set_id: Freed"
+      end ;
+      Lru.detach_remove elt lru
+
     let max_lru_size = 128
     let min_lru_size = max_lru_size / 2
 
@@ -193,10 +207,16 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
         write_all css
 
     let write_all lst = write_all (regroup lst)
+    let no_finalizer _ = failwith "no finalizer"
 
     let rec lru_make_room acc =
       let open Lwt_result.Syntax in
       if Lru.length lru < min_lru_size
+         ||
+         match Lru.peek_back lru with
+         | None -> assert false
+         | Some e when e.finalize == no_finalizer -> true
+         | _ -> false
       then begin
         match acc with
         | [] -> Lwt_result.return ()
@@ -286,27 +306,23 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
         c
 
     let allocate ~from () =
-      let sector =
-        { cstruct = Cstruct (cstruct_create ())
-        ; finalize = (fun _ -> failwith "no finalizer")
-        }
-      in
+      let sector = { cstruct = Cstruct (cstruct_create ()); finalize = no_finalizer } in
       match from with
       | `Root -> Lwt_result.return (Lru.make_detached sector)
       | `Load -> begin
-        let elt = Lru.make_elt sector lru in
         let open Lwt_result.Syntax in
         let make_room () =
           if (not !safe_lru) || Lru.length lru < max_lru_size
           then Lwt_result.return ()
           else begin
+            assert !safe_lru ;
             safe_lru := false ;
             let+ () = lru_make_room [] in
             safe_lru := true
           end
         in
         let+ () = make_room () in
-        elt
+        Lru.make_elt sector lru
       end
 
     let set_finalize s fn = s.finalize <- fn

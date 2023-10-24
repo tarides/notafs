@@ -12,7 +12,7 @@ module Make (B : Context.A_DISK) : sig
   val update : t -> queue:Queue.q -> payload:Sector.t -> unit io
   val get_free_queue : t -> (Sector.id * Sector.ptr) io
   val get_payload : t -> Sector.ptr io
-  val flush : Sector.t list -> unit io
+  val flush : (Sector.id * Cstruct.t) list -> unit io
   val pred_gen : t -> unit
 end = struct
   module Schema = Schema.Make (B)
@@ -20,7 +20,7 @@ end = struct
   module Queue = Queue.Make (B)
   open Lwt_result.Syntax
 
-  let nb = 2
+  let nb = 8
 
   let rec regroup (first, last, cs, acc) = function
     | [] -> List.rev ((first, List.rev cs) :: acc)
@@ -39,8 +39,9 @@ end = struct
       let* w = Sector.to_write x in
       list_to_write (w :: acc) xs
 
+  let list_to_write lst = list_to_write [] lst
+
   let regroup lst =
-    let+ lst = list_to_write [] lst in
     regroup @@ List.sort (fun (a_id, _) (b_id, _) -> B.Id.compare a_id b_id) lst
 
   let rec flush = function
@@ -50,7 +51,7 @@ end = struct
       flush css
 
   let flush lst =
-    let* lst = regroup lst in
+    let lst = regroup lst in
     flush lst
 
   type schema =
@@ -129,7 +130,10 @@ end = struct
       in
       create_gens 0 []
     in
-    let+ () = flush generations in
+    let+ () =
+      let* generations = list_to_write generations in
+      flush generations
+    in
     let generations = Array.of_list generations in
     { generation; generations }
 
@@ -153,7 +157,5 @@ end = struct
     free_start, queue
 
   let get_payload t = get_payload (current t)
-
-  let pred_gen t =
-    t.generation <- Int64.pred t.generation
+  let pred_gen t = t.generation <- Int64.pred t.generation
 end

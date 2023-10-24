@@ -226,9 +226,7 @@ module Make (B : Context.A_DISK) = struct
   let finalize (f, q) ids =
     let+ ts, rest = Sector.finalize q ids in
     assert (rest = []) ;
-    match ts with
-    | q :: _ -> (f, q), ts
-    | [] -> failwith "empty?"
+    (f, q), ts
 
   let allocate ~free_queue sector =
     let* count = Sector.count_new sector in
@@ -285,21 +283,17 @@ module Make (B : Context.A_DISK) = struct
       let* height = height queue in
       if height > 0
       then
-        (
         let* nb_children = nb_children queue in
         let rec check_child i =
           if i > nb_children - 1
-          then
-            Lwt_result.return ()
+          then Lwt_result.return ()
           else
             let* queue = get_child queue i in
             let* () = verify_queue queue in
             check_child (i + 1)
         in
         check_child 0
-        )
-      else
-        Lwt_result.return ()
+      else Lwt_result.return ()
     in
     verify_queue ptr
 
