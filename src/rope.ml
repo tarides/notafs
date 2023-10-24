@@ -295,15 +295,19 @@ module Make (B : Context.A_DISK) = struct
       then Lwt_result.return ()
       else begin
         let* n = get_nb_children t in
-        let rec go i =
+        let rec go i acc =
           if i >= n
-          then Lwt_result.return ()
-          else
-            let* child = get_child t i in
-            let* () = free child in
-            go (i + 1)
+          then acc
+          else begin
+            let acc =
+              let* child = get_child t i in
+              let* () = free child in
+              acc
+            in
+            go (i + 1) acc
+          end
         in
-        go 0
+        go 0 (Lwt_result.return ())
       end
     in
     Sector.drop_release t

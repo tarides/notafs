@@ -95,6 +95,14 @@ module Test (Kv : Mirage_kv.RW) = struct
 
   let main fs =
     let* () = write fs in
+    let* () = write fs in
+    let* () = write fs in
+    let* () = write fs in
+    let* () = write fs in
+    let* () = write fs in
+    let* () = write fs in
+    let* () = write fs in
+    let* () = write fs in
     let* () = read fs in
     let* () = read fs in
     let* () = write fs in

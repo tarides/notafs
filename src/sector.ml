@@ -291,20 +291,26 @@ end = struct
     B.set_finalize (Lru.value cstruct) (finalize_set_id t) ;
     t
 
+  let drop_from_parent t =
+    match t.parent with
+    | Detached -> ()
+    | Parent (parent, offset) ->
+      assert (H.find parent.children offset == t) ;
+      H.remove parent.children offset
+
   let drop_release t =
     H.iter (fun _ child -> assert (child.id = Freed)) t.children ;
-    match t.id with
-    | Root _ -> invalid_arg "Sector.drop_release: Root"
-    | Freed -> invalid_arg "Sector.drop_release: Freed"
-    | In_memory ->
-      H.iter (fun _ child -> assert (child.id = Freed)) t.children ;
-      B.unallocate t.cstruct ;
-      t.id <- Freed
-    | At id ->
-      H.iter (fun _ child -> assert (child.id = Freed)) t.children ;
-      B.discard id ;
-      B.unallocate t.cstruct ;
-      t.id <- Freed
+    assert (H.length t.children = 0) ;
+    begin
+      match t.id with
+      | Root _ -> invalid_arg "Sector.drop_release: Root"
+      | Freed -> invalid_arg "Sector.drop_release: Freed"
+      | In_memory -> ()
+      | At id -> B.discard id
+    end ;
+    B.unallocate t.cstruct ;
+    t.id <- Freed ;
+    drop_from_parent t
 
   let erase_region t ~off ~len =
     let* () = release t in
@@ -326,7 +332,6 @@ end = struct
       | Some child ->
         let j = i - len in
         assert (not (H.mem t.children j)) ;
-        assert (not (H.mem t.children i)) ;
         H.remove t.children i ;
         H.replace t.children j child ;
         child.parent <- Parent (t, j)
