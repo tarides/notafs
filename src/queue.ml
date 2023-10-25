@@ -226,9 +226,7 @@ module Make (B : Context.A_DISK) = struct
   let finalize (f, q) ids =
     let+ ts, rest = Sector.finalize q ids in
     assert (rest = []) ;
-    match ts with
-    | q :: _ -> (f, q), ts
-    | [] -> failwith "empty?"
+    (f, q), ts
 
   let allocate ~free_queue sector =
     let* count = Sector.count_new sector in

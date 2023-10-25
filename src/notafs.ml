@@ -63,15 +63,17 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
     { root; files; free_queue }
 
   let rec of_root root rollback_nb =
-    let t = unsafe_of_root root in
-    Lwt.bind t (function
-      | Error (`Invalid_checksum _) ->
-        if rollback_nb > Root.nb
-        then Lwt_result.fail `All_generations_corrupted
-        else (
-          Root.pred_gen root ;
-          of_root root (rollback_nb + 1))
-      | r -> Lwt_result.lift r)
+    let open Lwt.Syntax in
+    let* t = unsafe_of_root root in
+    match t with
+    | Error (`Invalid_checksum _) ->
+      if rollback_nb > Root.nb
+      then Lwt_result.fail `All_generations_corrupted
+      else begin
+        Root.pred_gen root ;
+        of_root root (rollback_nb + 1)
+      end
+    | r -> Lwt_result.lift r
 
   let of_root root =
     let+ t = of_root root 0 in
