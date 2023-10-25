@@ -18,7 +18,7 @@ end = struct
     ; size' : int
     }
 
-    type t =
+  type t =
     { block : B.t
     ; mutable size : int * int
     ; nb_pages : int
@@ -80,7 +80,9 @@ end = struct
       for i = 0 to Array.length t.bitmaps - 1 do
         let nb_horz = (w - t.vars.border) / t.vars.size' in
         let x, y = i mod nb_horz, i / nb_horz in
-        let x, y = t.vars.border + (x * t.vars.size'), t.vars.border_bottom + (y * t.vars.size') in
+        let x, y =
+          t.vars.border + (x * t.vars.size'), t.vars.border_bottom + (y * t.vars.size')
+        in
         let img = t.bitmaps.(i) in
         draw_image img x y
       done
@@ -92,7 +94,7 @@ end = struct
     let s = 4 * t.vars.factor in
     G.set_color G.black ;
     for i = 0 to Array.length t.write_count - 1 do
-      let height = (32 * t.vars.factor) * t.write_count.(i) / worst in
+      let height = 32 * t.vars.factor * t.write_count.(i) / worst in
       G.fill_rect (s * i) 0 s height
     done
 
@@ -100,10 +102,10 @@ end = struct
     let worst = Array.fold_left max 0 t.read_count in
     let worst = max 10 worst in
     let wrote = ref false in
-    let s = (4 * t.vars.factor) in
+    let s = 4 * t.vars.factor in
     G.set_color G.black ;
     for i = 0 to Array.length t.read_count - 1 do
-      let height = (32 * t.vars.factor) * t.read_count.(i) / worst in
+      let height = 32 * t.vars.factor * t.read_count.(i) / worst in
       G.fill_rect (s * i) (34 * t.vars.factor) s height ;
       if (not !wrote) && t.read_count.(i) = worst
       then begin
@@ -117,7 +119,9 @@ end = struct
     let w, _ = t.size in
     let nb_horz = (w - t.vars.border) / t.vars.size' in
     let x, y = i mod nb_horz, i / nb_horz in
-    let x, y = t.vars.border + (x * t.vars.size'), t.vars.border_bottom + (y * t.vars.size') in
+    let x, y =
+      t.vars.border + (x * t.vars.size'), t.vars.border_bottom + (y * t.vars.size')
+    in
     let img = t.bitmaps.(i) in
     for y = 0 to t.vars.size - 1 do
       for x = 0 to t.vars.size - 1 do
@@ -129,10 +133,10 @@ end = struct
         in
         for y' = 0 to t.vars.factor - 1 do
           for x' = 0 to t.vars.factor - 1 do
-            img.(y * t.vars.factor + y').(x * t.vars.factor + x') <- colors.(g)
+            img.((y * t.vars.factor) + y').((x * t.vars.factor) + x') <- colors.(g)
           done
-        done ;
-      done ;
+        done
+      done
     done ;
     draw_image img x y ;
     G.moveto x y ;
@@ -149,7 +153,9 @@ end = struct
     let nb_horz = (w - t.vars.border) / t.vars.size' in
     let i = Int32.to_int i in
     let x, y = i mod nb_horz, i / nb_horz in
-    let x, y = t.vars.border + (x * t.vars.size'), t.vars.border_bottom + (y * t.vars.size') in
+    let x, y =
+      t.vars.border + (x * t.vars.size'), t.vars.border_bottom + (y * t.vars.size')
+    in
     let arr = t.bitmaps.(i) in
     for y = 0 to Array.length arr - 1 do
       for x = 0 to Array.length arr.(y) - 1 do
@@ -183,7 +189,7 @@ end = struct
     at_exit (fun () -> G.close_graph ())
 
   let vars factor =
-    let factor = min 1 factor in
+    let factor = max 1 factor in
     let true_size = 32 in
     let size = true_size * factor in
     let border = 2 in
@@ -191,13 +197,15 @@ end = struct
     let size' = size + border in
     { factor; true_size; size; border; border_bottom; size' }
 
-  let of_block ?(factor=1) block =
+  let of_block ?(factor = 1) block =
     let open Lwt.Syntax in
     let+ info = B.get_info block in
     let vars = vars factor in
     let w, h = G.size_x (), G.size_y () in
     let nb_pages = Int64.to_int info.size_sectors in
-    let bitmaps = Array.init nb_pages (fun _ -> Array.make_matrix vars.size vars.size 0x555555) in
+    let bitmaps =
+      Array.init nb_pages (fun _ -> Array.make_matrix vars.size vars.size 0x555555)
+    in
     let write_count = Array.make nb_pages 0 in
     let read_count = Array.make nb_pages 0 in
     let t = { block; size = w, h; nb_pages; bitmaps; write_count; read_count; vars } in
@@ -208,7 +216,6 @@ end = struct
 
   let disconnect t = B.disconnect t.block
   let sleep = ref 0.
-
   let pause = ref false
 
   let do_pause () =
@@ -228,13 +235,12 @@ end = struct
     refresh t ;
     while Graphics.key_pressed () do
       match Graphics.read_key () with
-      | ' '
-      | 'p' ->
-        Fmt.pr "Graphics: pause execution@.";
+      | ' ' | 'p' ->
+        Fmt.pr "Graphics: pause execution@." ;
         do_pause ()
       | _ -> ()
-    done;
-    if !pause then do_pause ();
+    done ;
+    if !pause then do_pause () ;
     let w, _ = t.size in
     G.set_color G.white ;
     G.fill_rect 0 0 w (t.vars.border_bottom - 15) ;

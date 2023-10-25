@@ -32,6 +32,7 @@ module type A_DISK = sig
     | `Write of write_error
     | `Invalid_checksum of Id.t
     | `All_generations_corrupted
+    | `Disk_not_formatted
     ]
 
   val page_size : int
@@ -84,6 +85,7 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
       | `Write of write_error
       | `Invalid_checksum of Id.t
       | `All_generations_corrupted
+      | `Disk_not_formatted
       ]
 
     type sector =

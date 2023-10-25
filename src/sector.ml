@@ -528,16 +528,16 @@ end = struct
   let verify_checksum t =
     match t.id, t.checksum with
     | At id, Some cs ->
-      (let* cs' =
-      let+ cstruct = B.cstruct t.cstruct in
-      get_checksum cstruct
+      let* cs' =
+        let+ cstruct = B.cstruct t.cstruct in
+        get_checksum cstruct
       in
       let+ () =
-        if (C.equal cs cs')
-        then (Lwt_result.return ())
-        else (Lwt_result.fail (`Invalid_checksum id))
+        if C.equal cs cs'
+        then Lwt_result.return ()
+        else Lwt_result.fail (`Invalid_checksum id)
       in
-      ())
+      ()
     | In_memory, None -> Lwt_result.return ()
     | _ -> assert false
 

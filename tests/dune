@@ -20,19 +20,10 @@
  (name bench_kv)
  (modules bench_kv)
  (package notafs)
- (libraries
-  lwt
-  notafs
-  mirage-block-unix
-  mirage-clock-unix
-  tar-mirage))
+ (libraries lwt notafs mirage-block-unix mirage-clock-unix tar-mirage))
 
 (test
  (name test_large_notafs)
  (modules test_large_notafs)
  (package notafs)
- (libraries
-  lwt
-  notafs
-  mirage-block-unix
-  mtime.clock.os))
+ (libraries lwt notafs mirage-block-unix mtime.clock.os))

@@ -48,6 +48,12 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
     }
 
   let unsafe_of_root root =
+    let* magic = Root.get_magic root in
+    let* () =
+      if magic <> Root.notafs_magic
+      then Lwt_result.fail `Disk_not_formatted
+      else Lwt_result.return ()
+    in
     let* payload = Root.get_payload root in
     let* free_queue = Root.get_free_queue root in
     let* files = Files.load payload in
@@ -58,18 +64,14 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
 
   let rec of_root root rollback_nb =
     let t = unsafe_of_root root in
-    Lwt.bind t
-      (function
+    Lwt.bind t (function
       | Error (`Invalid_checksum _) ->
         if rollback_nb > Root.nb
-        then
-          Lwt_result.fail `All_generations_corrupted
-        else
-          (Root.pred_gen root;
+        then Lwt_result.fail `All_generations_corrupted
+        else (
+          Root.pred_gen root ;
           of_root root (rollback_nb + 1))
-      | r ->
-        Lwt_result.lift r
-      )
+      | r -> Lwt_result.lift r)
 
   let of_root root =
     let+ t = of_root root 0 in
@@ -331,8 +333,24 @@ end
 module Make (B : DISK) = Make_check (Adler32) (B)
 
 module Make_kv (Check : CHECKSUM) (Block : DISK) : sig
-  include Mirage_kv.RW
+  type block_error =
+    [ `Read of Block.error
+    | `Write of Block.write_error
+    ]
 
+  type error =
+    [ Mirage_kv.error
+    | Mirage_kv.write_error
+    | block_error
+    | `Unsupported_operation of string
+    | `Disk_failed
+    ]
+
+  type write_error = error
+
+  include Mirage_kv.RW with type error := error and type write_error := write_error
+
+  val connect : Block.t -> (t, error) Lwt_result.t
   val format : Block.t -> (t, write_error) Lwt_result.t
   val flush : t -> (unit, write_error) Lwt_result.t
   val stats : t -> Stats.ro
@@ -370,6 +388,14 @@ end = struct
     | Ok v -> Ok v
 
   type t = T : (module S with type t = 'a) * 'a -> t
+
+  let connect block =
+    let open Lwt.Syntax in
+    let* (module A_disk) = Context.of_impl (module Block) (module Check) block in
+    let (module S) = (module Make_disk (A_disk) : S) in
+    let open Lwt_result.Syntax in
+    let+ (t : S.t) = lift_error @@ S.of_block () in
+    T ((module S), t)
 
   let format block =
     let open Lwt.Syntax in
@@ -416,10 +442,14 @@ end = struct
 
   let list (T ((module X), t)) key =
     let filename = Mirage_kv.Key.to_string key in
+    let lst = X.list t filename in
     let lst =
       List.map
-        (fun (filename, kind) -> Mirage_kv.Key.( / ) key filename, kind)
-        (X.list t filename)
+        (fun (filename, kind) ->
+          if kind = `Value && filename = ""
+          then key, kind
+          else Mirage_kv.Key.( / ) key filename, kind)
+        lst
     in
     Lwt.return_ok lst
 

@@ -74,7 +74,7 @@ let main ~fresh ~factor () =
   Io.notafs_flush () ;
   disconnect block ;
   (*
-  let with_store fn =
+     let with_store fn =
     let block = connect root in
     let () = Lwt_direct.direct @@ fun () -> Io.init block in
     let repo = Store.Repo.v (Store.config ~fresh:false "/") in
@@ -108,7 +108,7 @@ let main ~fresh ~factor () =
   let gc_commits = ref [] in
   let gc_run = ref 0 in
   let do_gc () =
-    incr gc_run;
+    incr gc_run ;
     B.draw_status block (Printf.sprintf "garbage collect START") ;
     match List.rev !gc_commits with
     | commit :: rest ->
@@ -117,7 +117,7 @@ let main ~fresh ~factor () =
       @@ fun repo _main ->
       (match Store.Gc.start_exn ~unlink:true repo commit with
        | status ->
-        Format.printf "GC run %d: %b@." !gc_run status ;
+         Format.printf "GC run %d: %b@." !gc_run status ;
          B.draw_status block (Printf.sprintf "garbage collect FINALISE") ;
          let _ = Store.Gc.finalise_exn ~wait:false repo in
          B.draw_status block (Printf.sprintf "garbage collect DONE") ;
@@ -162,19 +162,22 @@ open Cmdliner
 
 let sleep =
   Arg.(
-    value & opt float (0.) & info [ "s"; "sleep" ] ~docv:"sleep" ~doc:"sleep time in seconds")
+    value
+    & opt float 0.
+    & info [ "s"; "sleep" ] ~docv:"sleep" ~doc:"sleep time in seconds")
 
 let pause =
   Arg.(
-    value & opt bool (false) & info [ "p"; "pause" ] ~docv:"pause" ~doc:"automatically trigger a pause")
+    value
+    & opt bool false
+    & info [ "p"; "pause" ] ~docv:"pause" ~doc:"automatically trigger a pause")
 
 let factor =
-  Arg.(
-    value & opt int 1 & info [ "f"; "factor" ] ~docv:"factor" ~doc:"ui factor")
+  Arg.(value & opt int 1 & info [ "f"; "factor" ] ~docv:"factor" ~doc:"ui factor")
 
 let main sleep pause factor =
-  B.sleep := sleep;
-  B.pause := pause;
+  B.sleep := sleep ;
+  B.pause := pause ;
   Lwt_main.run
   @@ Lwt_direct.indirect
   @@ fun () -> Eio_mock.Backend.run @@ main ~fresh:true ~factor

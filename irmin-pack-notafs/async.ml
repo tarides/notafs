@@ -23,7 +23,5 @@ let async fn : t =
   | err -> `Failure (Printexc.to_string err)
 
 let await (#t as t) = t
-
 let status (#t as t) = t
-
 let cancel (_ : t) = false

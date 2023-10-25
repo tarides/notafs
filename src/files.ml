@@ -100,7 +100,7 @@ module Make (B : Context.A_DISK) = struct
       { on_disk; files; dirty = false }
 
   let verify_checksum t =
-    let seq = (M.to_seq t.files) in
+    let seq = M.to_seq t.files in
     let seq = Seq.map (fun (_, rope) () -> Rope.verify_checksum !rope) seq in
     Seq.fold_left Lwt_result.bind (Lwt_result.return ()) seq
 
@@ -143,17 +143,25 @@ module Make (B : Context.A_DISK) = struct
     rope := t
 
   let list t prefix =
-    let prefix = prefix ^ "/" in
-    let prefix_len = String.length prefix in
-    List.sort_uniq Stdlib.compare
-    @@ List.filter_map (fun (filename, _) ->
-      if not (String.starts_with ~prefix filename)
-      then None
-      else (
-        match String.index_from_opt filename prefix_len '/' with
-        | None -> Some (filename, `Value)
-        | Some offset ->
-          let dirname = String.sub filename prefix_len (offset - prefix_len - 1) in
-          Some (dirname, `Dictionary)))
-    @@ M.bindings t.files
+    let prefix' = if prefix = "/" then "/" else prefix ^ "/" in
+    let prefix_len = String.length prefix' in
+    let lst =
+      let lst =
+        List.filter_map (fun (filename, _) ->
+          if not (String.starts_with ~prefix:prefix' filename)
+          then None
+          else (
+            match String.index_from_opt filename prefix_len '/' with
+            | None ->
+              let len = String.length filename in
+              let filename = String.sub filename prefix_len (len - prefix_len) in
+              Some (filename, `Value)
+            | Some offset ->
+              let dirname = String.sub filename prefix_len (offset - prefix_len) in
+              Some (dirname, `Dictionary)))
+        @@ M.bindings t.files
+      in
+      List.sort_uniq Stdlib.compare lst
+    in
+    lst
 end

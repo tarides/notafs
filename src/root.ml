@@ -10,6 +10,8 @@ module Make (B : Context.A_DISK) : sig
   val load : unit -> t io
   val format : unit -> t io
   val update : t -> queue:Queue.q -> payload:Sector.t -> unit io
+  val notafs_magic : int64
+  val get_magic : t -> int64 io
   val get_free_queue : t -> (Sector.id * Sector.ptr) io
   val get_payload : t -> Sector.ptr io
   val flush : Sector.t list -> unit io
@@ -54,25 +56,29 @@ end = struct
     flush lst
 
   type schema =
-    { generation : int64 Schema.field
+    { magic : int64 Schema.field
+    ; generation : int64 Schema.field
     ; free_start : Sector.id Schema.field
     ; free_queue : Schema.ptr
     ; payload : Schema.ptr
     }
 
-  let { generation; free_start; free_queue; payload } =
+  let { magic; generation; free_start; free_queue; payload } =
     Schema.define
     @@
     let open Schema.Syntax in
-    let+ generation = Schema.uint64
+    let+ magic = Schema.uint64
+    and+ generation = Schema.uint64
     and+ free_start = Schema.id
     and+ free_queue = Schema.ptr
     and+ payload = Schema.ptr in
-    { generation; free_start; free_queue; payload }
+    { magic; generation; free_start; free_queue; payload }
 
   include struct
     open Schema.Infix
 
+    let set_magic t v = t.@(magic) <- v
+    let get_magic t = t.@(magic)
     let set_generation t v = t.@(generation) <- v
     let generation t = t.@(generation)
     let set_free_start t v = t.@(free_start) <- v
@@ -87,6 +93,8 @@ end = struct
     { mutable generation : Int64.t
     ; generations : Sector.t array
     }
+
+  let notafs_magic = 86102622946899L (* NOTAFS *)
 
   let rec find_latest_generation g = function
     | [] -> Lwt_result.return g
@@ -114,6 +122,7 @@ end = struct
       let create_gen i =
         let i = B.Id.of_int i in
         let* s = Sector.create ~at:(Sector.root_loc i) () in
+        let* () = set_magic s notafs_magic in
         let* () = set_generation s Int64.zero in
         let* () = set_free_start s free_start in
         let* () = set_free_queue s Sector.null_ptr in
@@ -139,12 +148,15 @@ end = struct
   let update t ~queue:(new_free_start, new_free_root) ~payload =
     t.generation <- Int64.succ t.generation ;
     let s = current t in
+    let* () = set_magic s notafs_magic in
     let* () = set_generation s t.generation in
     let* () = set_free_start s new_free_start in
     let* () = set_free_queue s (Sector.to_ptr new_free_root) in
     let* () = set_payload s (Sector.to_ptr payload) in
     let* id, cstruct = Sector.to_write s in
     B.write id [ cstruct ]
+
+  let get_magic t = get_magic (current t)
 
   let get_free_queue t =
     let g = current t in
@@ -153,7 +165,5 @@ end = struct
     free_start, queue
 
   let get_payload t = get_payload (current t)
-
-  let pred_gen t =
-    t.generation <- Int64.pred t.generation
+  let pred_gen t = t.generation <- Int64.pred t.generation
 end
