@@ -1,3 +1,5 @@
+# Notafs
+
 **:warning: This is an incomplete work-in-progress, bugs are expected: Do not use it if you can't afford to loose data.**
 
 Notafs is a library allowing the creation of copy-on-write filesystems running on Mirage block devices. At its core, it provides a glorified memory allocator to allocate and release pages of the disk in a safe way. Some nice properties are derived from there:
@@ -42,4 +44,66 @@ $ opam switch 5.0.0
 
 # Enable experimental support for OCaml 5 on solo5:
 $ opam pin https://github.com/mirage/ocaml-solo5.git#500-cleaned -ny
+```
+
+## Notafs-CLI
+
+The notafs project has a CLI meant to ease up the creation and setup of notafs disks using the mirage-kv interface, making them easily accesible from within a unikernel.
+
+In order to use the CLI, first install the package and create a disk:
+
+```shell
+# Pin the library
+$ cd notafs
+notafs/ $ opam pin . -ny --with-version=dev
+
+# Create a disk
+$ dd if=/dev/zero of=/tmp/storage count=400
+```
+
+Now that you have a disk, you will need to format it: It is a mandatory step, otherwise the other functions will raise an error and disk will be unusable:
+
+```shell
+# Format the disk
+notafs/ $ notafs-cli format -d/tmp/storage
+```
+
+With a formatted disk, you can fill-in your disk with the following commands:
+
+```shell
+# Touch a file named 'foo'
+notafs/ $ notafs-cli touch -d/tmp/storage foo
+
+# Rename it to 'bar':
+notafs/ $ notafs-cli rename -d/tmp/storage foo bar
+
+# Remove it:
+notafs/ $ notafs-cli remove -d/tmp/storage bar
+```
+
+Those default commands are usefull but copying local files into the disk and extract them afterward can be even more useful:
+**:info: paths of the disk have to be prefixed with the character '@' when using the function `copy`**
+
+```shell
+# Copy a local file `foo` into the disk as `files/foo`:
+notafs/ $ notafs-cli copy -d/tmp/storage foo @file/foo
+
+# Duplicate a disk file `file/foo` as `bar`:
+notafs/ $ notafs-cli copy -d/tmp/storage @file/foo @bar
+
+# Extract a disk file `bar` and name it `goo`:
+notafs/ $ notafs-cli copy -d/tmp/storage @bar goo
+```
+
+Lastly those functions will help you have a better understanding of the content of the disk and it's files:
+
+```shell
+# Dump a file `foo` from the disk into the standard output:
+notafs/ $ notafs-cli cat -d/tmp/storage foo
+
+# Get the size and last modified date (date not supported yet) of a file `foo`:
+notafs/ $ notafs-cli stats -d/tmp/storage foo
+
+# List all the files/subdirectories of the folder `files`:
+notafs/ $ notafs-cli list -d/tmp/storage files
 ```

@@ -95,7 +95,7 @@ end = struct
     ; generations : Sector.t array
     }
 
-  let notafs_magic = 86102622946899L (* NOTAFS *)
+  let notafs_magic = 0x534641544F4EL (* NOTAFS *)
 
   let rec find_latest_generation g = function
     | [] -> Lwt_result.return g
