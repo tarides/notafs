@@ -74,9 +74,7 @@ module Make (B : Context.A_DISK) = struct
       assert (n <= max_length) ;
       let rec go i children =
         if i >= max_length
-        then begin
-          Lwt_result.return (Overflow children)
-        end
+        then Lwt_result.return (Overflow children)
         else begin
           let* last = create () in
           let* () = set_nb_children t (i + 1) in
@@ -107,12 +105,33 @@ module Make (B : Context.A_DISK) = struct
       let* () = set_child root 0 t in
       push_back_list root children
 
-  let rec push_discarded t =
+  let size ptr =
+    let rec size queue =
+      let* height = height queue in
+      if height = 0
+      then nb_free_sectors queue
+      else
+        let* nb_children = nb_children queue in
+        let rec go i acc =
+          if i > nb_children - 1
+          then Lwt_result.return acc
+          else
+            let* queue = get_child queue i in
+            let* s = size queue in
+            go (i + 1) (acc + s)
+        in
+        go 0 0
+    in
+    size ptr
+
+  let rec push_discarded ~quantity t =
     match B.acquire_discarded () with
-    | [] -> Lwt_result.return t
+    | [] -> Lwt_result.return (t, quantity)
     | lst ->
       let* t = push_back_list t lst in
-      push_discarded t
+      push_discarded ~quantity:(quantity + List.length lst) t
+
+  let push_discarded t = push_discarded ~quantity:0 t
 
   type pop_front =
     | Ok_pop
@@ -165,6 +184,7 @@ module Make (B : Context.A_DISK) = struct
         assert (nb >= 0) ;
         if i >= len
         then begin
+          let* () = set_height t 0 in
           let+ () = set_nb_children t 0 in
           acc, Underflow nb
         end
@@ -190,43 +210,57 @@ module Make (B : Context.A_DISK) = struct
 
   let pop_front t nb =
     let* acc, res = do_pop_front t nb [] in
-    let+ t = push_discarded t in
+    let+ t, nb_discarded = push_discarded t in
     match res with
-    | Ok_pop -> t, acc
+    | Ok_pop -> t, acc, Int64.of_int (nb - nb_discarded)
     | Underflow 0 -> failwith "Underflow 0: Disk is full"
     | Underflow _ -> failwith "Disk is full"
 
-  type q = Sector.id * t
+  type q =
+    { free_start : Sector.id
+    ; free_queue : t
+    ; free_sectors : Int64.t
+    }
 
-  let push_back (free_start, free_queue) lst =
+  let push_back { free_start; free_queue; free_sectors } lst =
     let* free_queue = push_back_list free_queue lst in
-    let+ free_queue = push_discarded free_queue in
-    free_start, free_queue
+    let+ free_queue, nb = push_discarded free_queue in
+    { free_start
+    ; free_queue
+    ; free_sectors = Int64.add free_sectors (Int64.of_int (nb + List.length lst))
+    }
 
-  let push_discarded (free_start, free_queue) =
-    let+ free_queue = push_discarded free_queue in
-    free_start, free_queue
+  let push_discarded { free_start; free_queue; free_sectors } =
+    let+ free_queue, nb = push_discarded free_queue in
+    { free_start; free_queue; free_sectors = Int64.add free_sectors (Int64.of_int nb) }
 
-  let pop_front (free_start, free_queue) quantity =
+  let pop_front { free_start; free_queue; free_sectors } quantity =
     let easy_alloc =
       min quantity Int64.(to_int (sub B.nb_sectors (B.Id.to_int64 free_start)))
     in
     assert (easy_alloc >= 0) ;
     let rest_alloc = quantity - easy_alloc in
     let head = List.init easy_alloc (fun i -> B.Id.add free_start i) in
-    let+ free_queue, tail =
+    let+ free_queue, tail, quantity =
       if rest_alloc <= 0
-      then Lwt_result.return (free_queue, [])
+      then Lwt_result.return (free_queue, [], 0L)
       else pop_front free_queue rest_alloc
     in
-    (B.Id.add free_start easy_alloc, free_queue), head @ tail
+    let quantity = Int64.add quantity (Int64.of_int easy_alloc) in
+    let q =
+      { free_start = B.Id.add free_start easy_alloc
+      ; free_queue
+      ; free_sectors = Int64.sub free_sectors quantity
+      }
+    in
+    q, head @ tail
 
-  let count_new (_, q) = Sector.count_new q
+  let count_new { free_queue = q; _ } = Sector.count_new q
 
-  let finalize (f, q) ids =
+  let finalize { free_start = f; free_queue = q; free_sectors } ids =
     let+ ts, rest = Sector.finalize q ids in
     assert (rest = []) ;
-    (f, q), ts
+    { free_start = f; free_queue = q; free_sectors }, ts
 
   let allocate ~free_queue sector =
     let* count = Sector.count_new sector in
@@ -273,11 +307,11 @@ module Make (B : Context.A_DISK) = struct
     then alloc_queue [] count free_queue
     else Lwt_result.return (free_queue, [])
 
-  let load (free_start, ptr) =
-    let+ queue = if Sector.is_null_ptr ptr then create () else Sector.load ptr in
-    free_start, queue
+  let load (free_start, ptr, free_sectors) =
+    let+ free_queue = if Sector.is_null_ptr ptr then create () else Sector.load ptr in
+    { free_start; free_queue; free_sectors }
 
-  let verify_checksum (_, ptr) =
+  let verify_checksum { free_queue = ptr; _ } =
     let rec verify_queue queue =
       let* () = Sector.verify_checksum queue in
       let* height = height queue in
@@ -297,7 +331,10 @@ module Make (B : Context.A_DISK) = struct
     in
     verify_queue ptr
 
-  let make ~free_start =
+  let make ~free_start ~nb_roots =
     let+ t = Sector.create () in
-    free_start, t
+    let free_sectors = Int64.sub B.nb_sectors nb_roots in
+    { free_start; free_queue = t; free_sectors }
+
+  let size { free_queue; _ } = size free_queue
 end

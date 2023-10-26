@@ -73,15 +73,19 @@ let main ~fresh ~factor () =
   Store.Repo.close repo ;
   Io.notafs_flush () ;
   disconnect block ;
-  (*
-     let with_store fn =
+  let with_store fn =
     let block = connect root in
     let () = Lwt_direct.direct @@ fun () -> Io.init block in
     let repo = Store.Repo.v (Store.config ~fresh:false "/") in
     let main = Store.main repo in
-    Fun.protect (fun () -> fn repo main) ~finally:(fun () -> Store.Repo.close repo; disconnect block)
-    in *)
+    Fun.protect
+      (fun () -> fn repo main)
+      ~finally:(fun () ->
+        Store.Repo.close repo ;
+        disconnect block)
+  in
   (*
+     let block = connect root in
      let () = Lwt_direct.direct @@ fun () -> Io.init block in
      let repo = Store.Repo.v (Store.config ~fresh:false "/") in
      let with_store fn =
@@ -89,13 +93,6 @@ let main ~fresh ~factor () =
        fn repo main
      in
   *)
-  let block = connect root in
-  let () = Lwt_direct.direct @@ fun () -> Io.init block in
-  let repo = Store.Repo.v (Store.config ~fresh:false "/") in
-  let with_store fn =
-    let main = Store.main repo in
-    fn repo main
-  in
   begin
     with_store
     @@ fun _repo main ->

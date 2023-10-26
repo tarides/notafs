@@ -58,6 +58,7 @@ module Make (B : Context.A_DISK) = struct
 
   let char = make 1 Sector.get_uint8 Sector.set_uint8
   let uint8 = make 1 Sector.get_uint8 Sector.set_uint8
+  let uint16 = make 2 Sector.get_uint16 Sector.set_uint16
   let uint32 = make 4 Sector.get_uint32 Sector.set_uint32
   let uint64 = make 8 Sector.get_uint64 Sector.set_uint64
 
@@ -75,7 +76,7 @@ module Make (B : Context.A_DISK) = struct
 
   let array thing : 'a dyn_array t =
     fun ~max_size ofs ->
-    let ofs, length = uint8 ~max_size ofs in
+    let ofs, length = uint16 ~max_size ofs in
     let rest = max_size - ofs in
     let size_of_thing = size_of ~max_size:rest thing in
     let max_length = rest / size_of_thing in

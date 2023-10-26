@@ -12,7 +12,7 @@ module Make (B : Context.A_DISK) : sig
   val update : t -> queue:Queue.q -> payload:Sector.t -> unit io
   val notafs_magic : int64
   val get_magic : t -> int64 io
-  val get_free_queue : t -> (Sector.id * Sector.ptr) io
+  val get_free_queue : t -> (Sector.id * Sector.ptr * int64) io
   val get_payload : t -> Sector.ptr io
   val flush : (Sector.id * Cstruct.t) list -> unit io
   val pred_gen : t -> unit
@@ -61,10 +61,11 @@ end = struct
     ; generation : int64 Schema.field
     ; free_start : Sector.id Schema.field
     ; free_queue : Schema.ptr
+    ; free_sectors : int64 Schema.field
     ; payload : Schema.ptr
     }
 
-  let { magic; generation; free_start; free_queue; payload } =
+  let { magic; generation; free_start; free_queue; free_sectors; payload } =
     Schema.define
     @@
     let open Schema.Syntax in
@@ -72,8 +73,9 @@ end = struct
     and+ generation = Schema.uint64
     and+ free_start = Schema.id
     and+ free_queue = Schema.ptr
+    and+ free_sectors = Schema.uint64
     and+ payload = Schema.ptr in
-    { magic; generation; free_start; free_queue; payload }
+    { magic; generation; free_start; free_queue; free_sectors; payload }
 
   include struct
     open Schema.Infix
@@ -86,6 +88,8 @@ end = struct
     let get_free_start t = t.@(free_start)
     let set_free_queue t v = t.@(free_queue) <- v
     let free_queue t = t.@(free_queue)
+    let set_free_sectors t v = t.@(free_sectors) <- v
+    let free_sectors t = t.@(free_sectors)
     let get_payload t = t.@(payload)
     let set_payload t v = t.@(payload) <- v
   end
@@ -119,6 +123,7 @@ end = struct
   let format () =
     let free_start = B.Id.of_int nb in
     let generation = Int64.of_int 0 in
+    let free_sectors = Int64.sub B.nb_sectors (Int64.of_int nb) in
     let* generations =
       let create_gen i =
         let i = B.Id.of_int i in
@@ -127,6 +132,7 @@ end = struct
         let* () = set_generation s Int64.zero in
         let* () = set_free_start s free_start in
         let* () = set_free_queue s Sector.null_ptr in
+        let* () = set_free_sectors s free_sectors in
         let+ () = set_payload s Sector.null_ptr in
         s
       in
@@ -149,13 +155,22 @@ end = struct
   let current_idx t = Int64.rem t.generation (Int64.of_int nb)
   let current t = t.generations.(Int64.to_int (current_idx t))
 
-  let update t ~queue:(new_free_start, new_free_root) ~payload =
+  let update
+    t
+    ~queue:
+      { Queue.free_start = new_free_start
+      ; free_queue = new_free_root
+      ; free_sectors = new_free_sectors
+      }
+    ~payload
+    =
     t.generation <- Int64.succ t.generation ;
     let s = current t in
     let* () = set_magic s notafs_magic in
     let* () = set_generation s t.generation in
     let* () = set_free_start s new_free_start in
     let* () = set_free_queue s (Sector.to_ptr new_free_root) in
+    let* () = set_free_sectors s new_free_sectors in
     let* () = set_payload s (Sector.to_ptr payload) in
     let* id, cstruct = Sector.to_write s in
     B.write id [ cstruct ]
@@ -165,8 +180,9 @@ end = struct
   let get_free_queue t =
     let g = current t in
     let* queue = free_queue g in
-    let+ free_start = get_free_start g in
-    free_start, queue
+    let* free_start = get_free_start g in
+    let+ free_sectors = free_sectors g in
+    free_start, queue, free_sectors
 
   let get_payload t = get_payload (current t)
   let pred_gen t = t.generation <- Int64.pred t.generation

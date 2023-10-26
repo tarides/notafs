@@ -131,6 +131,13 @@ let main () =
     Lwt.return ()
   in
   let* () =
+    let* fs = no_error @@ Notafs_kv.of_block block in
+    Format.printf "@.--- Notafs without checksum:@." ;
+    let* () = Test_notafs.main fs in
+    Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Notafs_kv.stats fs) ;
+    Lwt.return ()
+  in
+  let* () =
     let* fs = no_error @@ Notafs_kv_crc.format block in
     Format.printf "@.--- Notafs with checksum:@." ;
     let* () = Test_notafs_crc.main fs in

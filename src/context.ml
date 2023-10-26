@@ -211,6 +211,12 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
     let write_all lst = write_all (regroup lst)
     let no_finalizer _ = failwith "no finalizer"
 
+    let rec list_align_with acc xs ys =
+      match xs, ys with
+      | rest, [] -> List.rev acc, rest
+      | x :: xs, _ :: ys -> list_align_with (x :: acc) xs ys
+      | _ -> assert false
+
     let rec lru_make_room acc =
       let open Lwt_result.Syntax in
       if Lru.length lru < min_lru_size
@@ -226,6 +232,16 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
           let nb = List.length acc in
           let* ids = !allocator nb in
           let acc =
+            List.filter
+              (fun (s, _, _) ->
+                match s.cstruct with
+                | Cstruct _ -> true
+                | _ -> false)
+              acc
+          in
+          let ids, ids_rest = list_align_with [] ids acc in
+          List.iter discard ids_rest ;
+          let acc =
             List.sort
               (fun (_, a_depth, _) (_, b_depth, _) -> Int.compare b_depth a_depth)
               acc
@@ -240,16 +256,17 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
                   let+ () = finalizer id in
                   s.cstruct <- On_disk id ;
                   id, cstruct
-                | _ -> assert false
+                | On_disk _ -> assert false
+                | Freed -> assert false
               in
               finalize (cstruct :: acc) ids ss
             | _ -> assert false
           in
           let* cstructs = finalize [] ids acc in
-          let* () = write_all cstructs in
+          let+ () = write_all cstructs in
           let rec finalize ids acc =
             match ids, acc with
-            | [], [] -> Lwt_result.return ()
+            | [], [] -> ()
             | id :: ids, (s, _, _) :: ss ->
               begin
                 match s.cstruct with
@@ -260,8 +277,8 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
               finalize ids ss
             | _ -> assert false
           in
-          let+ () = finalize ids acc in
-          release_cstructs @@ List.map snd cstructs ;
+          finalize ids acc ;
+          release_cstructs (List.map snd cstructs) ;
           flush ()
         end
       end

@@ -97,25 +97,26 @@ module Make (B : Context.A_DISK) = struct
 
   let load ptr = if Sector.is_null_ptr ptr then create () else Sector.load ptr
 
-  let verify_checksum t =
-    let rec verify_rope t =
-      let* () = Sector.verify_checksum t in
-      let* height = get_height t in
-      if height > 0
-      then
-        let* nb_children = get_nb_children t in
-        let rec check_child i =
-          if i > nb_children - 1
-          then Lwt_result.return ()
-          else
+  let rec verify_checksum t =
+    let* () = Sector.verify_checksum t in
+    let* height = get_height t in
+    if height > 0
+    then
+      let* nb_children = get_nb_children t in
+      let rec check_child i acc =
+        if i > nb_children - 1
+        then acc
+        else begin
+          let acc =
             let* t = get_child t i in
-            let* () = verify_rope t in
-            check_child (i + 1)
-        in
-        check_child 0
-      else Lwt_result.return ()
-    in
-    verify_rope t
+            let* () = verify_checksum t in
+            acc
+          in
+          check_child (i + 1) acc
+        end
+      in
+      check_child 0 (Lwt_result.return ())
+    else Lwt_result.return ()
 
   let rec do_append t (str, i, str_len) =
     assert (i < str_len) ;

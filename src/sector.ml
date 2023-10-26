@@ -299,7 +299,6 @@ end = struct
       H.remove parent.children offset
 
   let drop_release t =
-    H.iter (fun _ child -> assert (child.id = Freed)) t.children ;
     assert (H.length t.children = 0) ;
     begin
       match t.id with
