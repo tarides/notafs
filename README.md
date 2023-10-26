@@ -82,7 +82,7 @@ notafs/ $ notafs-cli remove -d/tmp/storage bar
 ```
 
 Those default commands are usefull but copying local files into the disk and extract them afterward can be even more useful:
-**:info: paths of the disk have to be prefixed with the character '@' when using the function `copy`**
+**:warning: paths of the disk have to be prefixed with the character '@' when using the function `copy`**
 
 ```shell
 # Copy a local file `foo` into the disk as `files/foo`:
