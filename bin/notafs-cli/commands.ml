@@ -13,6 +13,30 @@ let format path =
   in
   on_error "format" @@ Lwt_main.run (format path)
 
+let string_of_disk_space space =
+  let kb = 1024L in
+  let mb = Int64.mul 1024L kb in
+  let gb = Int64.mul 1024L mb in
+  if space < kb
+  then Int64.to_string space ^ "b"
+  else if space < mb
+  then Int64.to_string (Int64.div space kb) ^ "kb"
+  else if space < gb
+  then Int64.to_string (Int64.div space mb) ^ "mb"
+  else Int64.to_string (Int64.div space gb) ^ "gb"
+
+let info_cmd disk =
+  let infos () =
+    let page_size = Int64.of_int (Disk.page_size disk) in
+    let disk_space = Int64.mul (Disk.disk_space disk) page_size in
+    let free_space = Int64.mul (Disk.free_space disk) page_size in
+    Fmt.pr "Disk space: %s@." (string_of_disk_space disk_space) ;
+    Fmt.pr "Free space: %s@." (string_of_disk_space free_space) ;
+    Fmt.pr "Sector size: %s@." (string_of_disk_space page_size) ;
+    Lwt_result.return ()
+  in
+  on_error "info" @@ Lwt_main.run (infos ())
+
 let touch disk path =
   let touch path =
     let k = Mirage_kv.Key.v path in
@@ -119,7 +143,7 @@ let stats disk path =
     Fmt.pr "Size: %a@." Optint.Int63.pp size ;
     Fmt.pr "Last modified: %s@." "<Not Supported Yet>"
   in
-  on_error "cat" @@ Lwt_main.run (cat path)
+  on_error "stats" @@ Lwt_main.run (cat path)
 
 let list disk path =
   let list path =
@@ -145,6 +169,12 @@ let format_cmd =
   let doc = "formats a disk for further use" in
   let info = Cmd.info "format" ~doc in
   Cmd.v info Term.(const format $ disk_path)
+
+(* Info *)
+let info_cmd =
+  let doc = "show available disk space" in
+  let info = Cmd.info "info" ~doc in
+  Cmd.v info Term.(const info_cmd $ disk)
 
 (* Touch *)
 let touch_cmd =

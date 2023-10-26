@@ -15,6 +15,7 @@ let main_cmd =
       info
       ~default
       [ format_cmd
+      ; info_cmd
       ; touch_cmd
       ; remove_cmd
       ; rename_cmd

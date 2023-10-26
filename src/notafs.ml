@@ -14,6 +14,9 @@ module type S = sig
   val format : unit -> t io
   val of_block : unit -> t io
   val flush : t -> unit io
+  val disk_space : t -> int64
+  val free_space : t -> int64
+  val page_size : t -> int
 
   type file
 
@@ -46,6 +49,10 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
     ; mutable files : Files.t
     ; mutable free_queue : Queue.q
     }
+
+  let free_space t = t.free_queue.free_sectors
+  let disk_space _ = B.nb_sectors
+  let page_size _ = B.page_size
 
   let unsafe_of_root root =
     let* magic = Root.get_magic root in
@@ -367,6 +374,9 @@ module Make_kv (Check : CHECKSUM) (Block : DISK) : sig
   val format : Block.t -> (t, write_error) Lwt_result.t
   val of_block : Block.t -> (t, write_error) Lwt_result.t
   val flush : t -> (unit, write_error) Lwt_result.t
+  val disk_space : t -> int64
+  val free_space : t -> int64
+  val page_size : t -> int
   val stats : t -> Stats.ro
 end = struct
   type block_error =
@@ -428,6 +438,9 @@ end = struct
     T ((module S), t)
 
   let flush (T ((module X), t)) = lift_error @@ X.flush t
+  let disk_space (T ((module X), t)) = X.disk_space t
+  let free_space (T ((module X), t)) = X.free_space t
+  let page_size (T ((module X), t)) = X.page_size t
 
   type key = Mirage_kv.Key.t
 
