@@ -131,6 +131,7 @@ end = struct
     let open Cstruct in
     assert (cstruct.off = 0) ;
     assert (cstruct.len = B.page_size) ;
+    assert (cstruct.len = Bigarray.Array1.dim cstruct.buffer) ;
     cstruct.buffer
 
   let get_checksum cstruct =
