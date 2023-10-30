@@ -55,12 +55,6 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
   let page_size _ = B.page_size
 
   let unsafe_of_root root =
-    let* magic = Root.get_magic root in
-    let* () =
-      if magic <> Root.notafs_magic
-      then Lwt_result.fail `Disk_not_formatted
-      else Lwt_result.return ()
-    in
     let* payload = Root.get_payload root in
     let* free_queue = Root.get_free_queue root in
     let* files = Files.load payload in
@@ -108,8 +102,10 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
     of_root root
 
   let of_block () =
-    let* root = Root.load () in
-    of_root root
+    Lwt.bind (Root.load ()) (function
+      | Ok root -> of_root root
+      | Error (`Invalid_checksum _) -> Lwt_result.fail `Disk_not_formatted
+      | Error e -> Lwt_result.fail e)
 
   let flush t =
     assert !B.safe_lru ;

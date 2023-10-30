@@ -25,6 +25,7 @@ module Make (B : Context.A_DISK) : sig
   val create : ?at:loc -> unit -> t r
   val load_root : id -> t r
   val load : ptr -> t r
+  val write_root : t -> unit r
   val to_write : t -> (id * Cstruct.t) r
   val length : t -> int
   val get_uint8 : t -> int -> int r
@@ -126,11 +127,50 @@ end = struct
     | Disk (id, cs) -> is_null_id id && is_null_cs cs
     | Mem _ -> false
 
+  let cstruct_to_bigarray cstruct =
+    let open Cstruct in
+    assert (cstruct.off = 0) ;
+    assert (cstruct.len = B.page_size) ;
+    cstruct.buffer
+
   let get_checksum cstruct =
     C.digest_bigstring (Cstruct.to_bigarray cstruct) 0 B.page_size C.default
 
   let set_checksum cstruct offset cs = C.write cstruct (offset + id_size) cs
   let read_checksum cstruct offset = C.read cstruct (offset + id_size)
+
+  open Lwt_result.Syntax
+
+  let ro_cstruct t = B.cstruct t.cstruct
+
+  let verify_checksum t =
+    match t.id, t.checksum with
+    | At id, Some cs ->
+      let* cstruct = ro_cstruct t in
+      let cs' = get_checksum cstruct in
+      if C.equal cs cs'
+      then Lwt_result.return ()
+      else Lwt_result.fail (`Invalid_checksum id)
+    | In_memory, None -> Lwt_result.return ()
+    | _ -> assert false
+
+  let root_checksum_offset = B.page_size - C.byte_size
+
+  let compute_root_checksum cstruct =
+    C.write cstruct root_checksum_offset C.default ;
+    C.digest_bigstring (cstruct_to_bigarray cstruct) 0 B.page_size C.default
+
+  let check_root_checksum ~id cstruct =
+    let* cstruct = B.cstruct cstruct in
+    let cs = C.read cstruct root_checksum_offset in
+    C.write cstruct root_checksum_offset C.default ;
+    let expected =
+      C.digest_bigstring (cstruct_to_bigarray cstruct) 0 B.page_size C.default
+    in
+    if C.equal cs expected
+    then Lwt_result.return ()
+    else Lwt_result.fail (`Invalid_checksum id)
+
   let root_loc i = Root i
 
   let is_in_memory t =
@@ -146,10 +186,6 @@ end = struct
       Disk (id, cs)
     | In_memory -> Mem t
     | Freed -> invalid_arg "Sector.ptr_of_t: freed"
-
-  open Lwt_result.Syntax
-
-  let ro_cstruct t = B.cstruct t.cstruct
 
   let rw_cstruct t =
     let+ cs = B.cstruct t.cstruct in
@@ -399,7 +435,8 @@ end = struct
     sector
 
   let load_root id =
-    let+ cstruct = read ~from:`Root id in
+    let* cstruct = read ~from:`Root id in
+    let+ () = check_root_checksum ~id cstruct in
     let t =
       { id = Root id
       ; cstruct
@@ -560,22 +597,12 @@ end = struct
     assert (List.length ids' + e = List.length ids) ;
     ts, ids'
 
-  let verify_checksum t =
-    match t.id, t.checksum with
-    | At id, Some cs ->
-      let* cstruct = ro_cstruct t in
-      let cs' = get_checksum cstruct in
-      if C.equal cs cs'
-      then Lwt_result.return ()
-      else Lwt_result.fail (`Invalid_checksum id)
-    | In_memory, None -> Lwt_result.return ()
-    | _ -> assert false
-
   let force_id t =
     match t.id with
-    | At id | Root id -> id
-    | In_memory -> failwith "Sector.force_id: in memory"
+    | At id -> id
+    | In_memory -> invalid_arg "Sector.force_id: in memory"
     | Freed -> invalid_arg "Sector.force_id: freed"
+    | Root _ -> invalid_arg "Sector.force_id: Root"
 
   let blit_from_string str i t j n =
     let* () = release t in
@@ -592,4 +619,13 @@ end = struct
   let to_write t =
     let+ cstruct = ro_cstruct t in
     force_id t, cstruct
+
+  let write_root t =
+    match t.id with
+    | Root id ->
+      let* cstruct = B.cstruct t.cstruct in
+      let cs = compute_root_checksum cstruct in
+      C.write cstruct root_checksum_offset cs ;
+      B.write id [ cstruct ]
+    | _ -> failwith "Sector.write_root: not a generation"
 end

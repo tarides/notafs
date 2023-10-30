@@ -35,14 +35,6 @@ end = struct
     | [] -> invalid_arg "Root.regroup: empty list"
     | (id, c) :: rest -> regroup (id, id, [ c ], []) rest
 
-  let rec list_to_write acc = function
-    | [] -> Lwt_result.return acc
-    | x :: xs ->
-      let* w = Sector.to_write x in
-      list_to_write (w :: acc) xs
-
-  let list_to_write lst = list_to_write [] lst
-
   let regroup lst =
     regroup @@ List.sort (fun (a_id, _) (b_id, _) -> B.Id.compare a_id b_id) lst
 
@@ -113,6 +105,12 @@ end = struct
       then Lwt_result.return (List.rev acc)
       else
         let* generation = Sector.load_root (B.Id.of_int i) in
+        let* magic = get_magic generation in
+        let* () =
+          if magic <> notafs_magic
+          then Lwt_result.fail `Disk_not_formatted
+          else Lwt_result.return ()
+        in
         load_gens (i + 1) (generation :: acc)
     in
     let* generations = load_gens 0 [] in
@@ -124,7 +122,7 @@ end = struct
     let free_start = B.Id.of_int nb in
     let generation = Int64.of_int 0 in
     let free_sectors = Int64.sub B.nb_sectors (Int64.of_int nb) in
-    let* generations =
+    let+ generations =
       let create_gen i =
         let i = B.Id.of_int i in
         let* s = Sector.create ~at:(Sector.root_loc i) () in
@@ -133,7 +131,8 @@ end = struct
         let* () = set_free_start s free_start in
         let* () = set_free_queue s Sector.null_ptr in
         let* () = set_free_sectors s free_sectors in
-        let+ () = set_payload s Sector.null_ptr in
+        let* () = set_payload s Sector.null_ptr in
+        let+ () = Sector.write_root s in
         s
       in
       let rec create_gens i acc =
@@ -144,10 +143,6 @@ end = struct
           create_gens (i + 1) (g :: acc)
       in
       create_gens 0 []
-    in
-    let+ () =
-      let* generations = list_to_write generations in
-      flush generations
     in
     let generations = Array.of_list generations in
     { generation; generations }
@@ -172,8 +167,7 @@ end = struct
     let* () = set_free_queue s (Sector.to_ptr new_free_root) in
     let* () = set_free_sectors s new_free_sectors in
     let* () = set_payload s (Sector.to_ptr payload) in
-    let* id, cstruct = Sector.to_write s in
-    B.write id [ cstruct ]
+    Sector.write_root s
 
   let get_magic t = get_magic (current t)
 
