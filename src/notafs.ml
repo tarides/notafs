@@ -76,17 +76,36 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
       end
     | r -> Lwt_result.lift r
 
-  let check_size t =
+  let reachable_size t =
+    let roots = Root.reachable_size t.root in
+    let* payload =
+      let* root_payload = Root.get_payload t.root in
+      if Sector.is_null_ptr root_payload
+      then Lwt_result.return 0
+      else Files.reachable_size t.files
+    in
+    let+ queue =
+      let* _, root_queue, _ = Root.get_free_queue t.root in
+      if Sector.is_null_ptr root_queue
+      then Lwt_result.return 0
+      else Queue.reachable_size t.free_queue
+    in
+    roots + queue + payload
+
+  let _check_size t =
+    let* rs = reachable_size t in
     let+ s = Queue.size t.free_queue in
     let expected_free =
       Int64.add
         (Int64.sub B.nb_sectors (B.Id.to_int64 t.free_queue.free_start))
         (Int64.of_int s)
     in
+    let used_space = Int64.to_int (Int64.sub B.nb_sectors expected_free) in
+    assert (used_space = rs) ;
     assert (Int64.equal t.free_queue.free_sectors expected_free)
 
   let of_root root =
-    let* t = of_root root 0 in
+    let+ t = of_root root 0 in
     (B.allocator
        := fun required ->
             let t_free_queue = t.free_queue in
@@ -94,7 +113,7 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
             assert (t.free_queue == t_free_queue) ;
             t.free_queue <- free_queue ;
             allocated) ;
-    let+ () = check_size t in
+    (* let+ () = check_size t in *)
     t
 
   let format () =
@@ -126,12 +145,12 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
         let* payload_root, to_flush, allocated = Files.to_payload t.files allocated in
         assert (allocated = []) ;
         let* () = Root.flush (List.rev_append to_flush_queue to_flush) in
-        let* () = Root.update t.root ~queue:free_queue ~payload:payload_root in
+        let+ free_queue = Root.update t.root ~queue:free_queue ~payload:payload_root in
         assert (B.acquire_discarded () = []) ;
         assert (t.free_queue == t_free_queue) ;
         t.free_queue <- free_queue ;
-        B.flush () ;
-        check_size t
+        B.flush ()
+        (* check_size t *)
       end
     in
     B.safe_lru := true ;

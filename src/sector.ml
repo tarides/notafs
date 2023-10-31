@@ -164,10 +164,7 @@ end = struct
   let check_root_checksum ~id cstruct =
     let* cstruct = B.cstruct cstruct in
     let cs = C.read cstruct root_checksum_offset in
-    C.write cstruct root_checksum_offset C.default ;
-    let expected =
-      C.digest_bigstring (cstruct_to_bigarray cstruct) 0 B.page_size C.default
-    in
+    let expected = compute_root_checksum cstruct in
     if C.equal cs expected
     then Lwt_result.return ()
     else Lwt_result.fail (`Invalid_checksum id)
@@ -600,10 +597,9 @@ end = struct
 
   let force_id t =
     match t.id with
-    | At id -> id
+    | At id | Root id -> id
     | In_memory -> invalid_arg "Sector.force_id: in memory"
     | Freed -> invalid_arg "Sector.force_id: freed"
-    | Root _ -> invalid_arg "Sector.force_id: Root"
 
   let blit_from_string str i t j n =
     let* () = release t in

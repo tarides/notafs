@@ -42,7 +42,7 @@ let root = "/tmp/notafs-irmin"
 module Fs = Store.Maker.Fs
 module Io = Store.Maker.Io
 
-let main ~fresh ~factor () =
+let main ~fresh ~factor ~stress () =
   let is_connected = ref false in
   let connect path =
     Lwt_direct.direct
@@ -73,26 +73,28 @@ let main ~fresh ~factor () =
   Store.Repo.close repo ;
   Io.notafs_flush () ;
   disconnect block ;
-  let with_store fn =
-    let block = connect root in
-    let () = Lwt_direct.direct @@ fun () -> Io.init block in
-    let repo = Store.Repo.v (Store.config ~fresh:false "/") in
-    let main = Store.main repo in
-    Fun.protect
-      (fun () -> fn repo main)
-      ~finally:(fun () ->
-        Store.Repo.close repo ;
-        disconnect block)
+  let with_store =
+    if stress
+    then
+      fun fn ->
+      let block = connect root in
+      let () = Lwt_direct.direct @@ fun () -> Io.init block in
+      let repo = Store.Repo.v (Store.config ~fresh:false "/") in
+      let main = Store.main repo in
+      Fun.protect
+        (fun () -> fn repo main)
+        ~finally:(fun () ->
+          Store.Repo.close repo ;
+          disconnect block)
+    else begin
+      let block = connect root in
+      let () = Lwt_direct.direct @@ fun () -> Io.init block in
+      let repo = Store.Repo.v (Store.config ~fresh:false "/") in
+      fun fn ->
+        let main = Store.main repo in
+        fn repo main
+    end
   in
-  (*
-     let block = connect root in
-     let () = Lwt_direct.direct @@ fun () -> Io.init block in
-     let repo = Store.Repo.v (Store.config ~fresh:false "/") in
-     let with_store fn =
-       let main = Store.main repo in
-       fn repo main
-     in
-  *)
   begin
     with_store
     @@ fun _repo main ->
@@ -172,15 +174,18 @@ let pause =
 let factor =
   Arg.(value & opt int 1 & info [ "f"; "factor" ] ~docv:"factor" ~doc:"ui factor")
 
-let main sleep pause factor =
+let stress =
+  Arg.(value & opt bool false & info [ "stress" ] ~docv:"stress" ~doc:"stress test")
+
+let main sleep pause factor stress =
   B.sleep := sleep ;
   B.pause := pause ;
   Lwt_main.run
   @@ Lwt_direct.indirect
-  @@ fun () -> Eio_mock.Backend.run @@ main ~fresh:true ~factor
+  @@ fun () -> Eio_mock.Backend.run @@ main ~fresh:true ~factor ~stress
 
 let main_cmd =
   let info = Cmd.info "graphics" in
-  Cmd.v info Term.(const main $ sleep $ pause $ factor)
+  Cmd.v info Term.(const main $ sleep $ pause $ factor $ stress)
 
 let () = exit (Cmd.eval ~catch:false main_cmd)

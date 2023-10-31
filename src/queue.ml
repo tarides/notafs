@@ -331,10 +331,23 @@ module Make (B : Context.A_DISK) = struct
     in
     verify_queue ptr
 
-  let make ~free_start ~nb_roots =
-    let+ t = Sector.create () in
-    let free_sectors = Int64.sub B.nb_sectors nb_roots in
-    { free_start; free_queue = t; free_sectors }
-
   let size { free_queue; _ } = size free_queue
+
+  let rec reachable_size queue =
+    let* height = height queue in
+    if height = 0
+    then Lwt_result.return 1
+    else
+      let* nb_children = nb_children queue in
+      let rec go i acc =
+        if i > nb_children - 1
+        then Lwt_result.return acc
+        else
+          let* queue = get_child queue i in
+          let* s = reachable_size queue in
+          go (i + 1) (acc + s)
+      in
+      go 0 1
+
+  let reachable_size { free_queue; _ } = reachable_size free_queue
 end

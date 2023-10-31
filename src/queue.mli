@@ -9,7 +9,6 @@ module Make (B : Context.A_DISK) : sig
 
   type 'a r := ('a, B.error) Lwt_result.t
 
-  val make : free_start:Sector.id -> nb_roots:Int64.t -> q r
   val load : Sector.id * Sector.ptr * Int64.t -> q r
   val verify_checksum : q -> unit r
   val push_back : q -> Sector.id list -> q r
@@ -19,4 +18,5 @@ module Make (B : Context.A_DISK) : sig
   val allocate : free_queue:q -> Sector.t -> (q * (Sector.id * Cstruct.t) list) r
   val self_allocate : free_queue:q -> (q * (Sector.id * Cstruct.t) list) r
   val size : q -> int r
+  val reachable_size : q -> int r
 end

@@ -312,4 +312,21 @@ module Make (B : Context.A_DISK) = struct
       end
     in
     Sector.drop_release t
+
+  let rec reachable_size t =
+    let* height = get_height t in
+    if height = 0
+    then Lwt_result.return 1
+    else
+      let* nb = get_nb_children t in
+      let rec go i acc =
+        if i >= nb
+        then Lwt_result.return acc
+        else begin
+          let* child = get_child t i in
+          let* s = reachable_size child in
+          go (i + 1) (acc + s)
+        end
+      in
+      go 0 1
 end

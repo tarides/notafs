@@ -205,6 +205,8 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
       | [] -> Lwt_result.return ()
       | (id, cs) :: css ->
         let open Lwt_result.Syntax in
+        let id_ = Int64.to_int @@ Id.to_int64 id in
+        assert (id_ <> 0 && id_ <> 1) ;
         let* () = write id cs in
         write_all css
 
@@ -313,16 +315,20 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
         in
         lru_make_room acc
 
+    let cstruct_reset c =
+      Cstruct.memset c 0xFF ;
+      c
+
     let cstruct_create () =
       match !available_cstructs with
       | [] -> Cstruct.create page_size
       | [ c ] :: css ->
         available_cstructs := css ;
-        c
+        cstruct_reset c
       | [] :: _ -> assert false
       | (c :: cs) :: css ->
         available_cstructs := cs :: css ;
-        c
+        cstruct_reset c
 
     let allocate ~from () =
       let sector = { cstruct = Cstruct (cstruct_create ()); finalize = no_finalizer } in

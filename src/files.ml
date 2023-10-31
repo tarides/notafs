@@ -164,4 +164,18 @@ module Make (B : Context.A_DISK) = struct
       List.sort_uniq Stdlib.compare lst
     in
     lst
+
+  let reachable_size t =
+    if M.cardinal t.files = 0
+    then Lwt_result.return 0
+    else begin
+      let* repr = Rope.reachable_size t.on_disk in
+      let rec go acc = function
+        | [] -> Lwt_result.return acc
+        | (_, rope) :: rest ->
+          let* s = Rope.reachable_size !rope in
+          go (acc + s) rest
+      in
+      go repr @@ M.bindings t.files
+    end
 end
