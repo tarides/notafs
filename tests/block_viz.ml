@@ -89,29 +89,37 @@ end = struct
     end
 
   let refresh_write_count t =
+    let w, _ = t.size in
+    let s = w / Array.length t.read_count in
     let worst = Array.fold_left max 0 t.write_count in
     let worst = max 10 worst in
-    let s = 4 * t.vars.factor in
     G.set_color G.black ;
+    let above = 32 * t.vars.factor in
+    G.moveto 5 above ;
+    G.draw_string "write counts:" ;
     for i = 0 to Array.length t.write_count - 1 do
       let height = 32 * t.vars.factor * t.write_count.(i) / worst in
       G.fill_rect (s * i) 0 s height
     done
 
   let refresh_read_count t =
+    let w, _ = t.size in
+    let s = w / Array.length t.read_count in
     let worst = Array.fold_left max 0 t.read_count in
     let worst = max 10 worst in
     let wrote = ref false in
-    let s = 4 * t.vars.factor in
     G.set_color G.black ;
+    let above = (64 + 32) * t.vars.factor in
+    G.moveto 5 above ;
+    G.draw_string "read counts:" ;
     for i = 0 to Array.length t.read_count - 1 do
       let height = 32 * t.vars.factor * t.read_count.(i) / worst in
-      G.fill_rect (s * i) (34 * t.vars.factor) s height ;
+      G.fill_rect (s * i) (64 * t.vars.factor) s height ;
       if (not !wrote) && t.read_count.(i) = worst
       then begin
         wrote := true ;
-        G.moveto (s * i) 68 ;
-        G.draw_string (Printf.sprintf "[%i] %ix" i worst)
+        G.moveto (s * i) ((64 + 32) * t.vars.factor) ;
+        G.draw_string (Printf.sprintf "%ix of sector %i" worst i)
       end
     done
 
@@ -193,7 +201,7 @@ end = struct
     let true_size = 32 in
     let size = true_size * factor in
     let border = 2 in
-    let border_bottom = 64 * factor in
+    let border_bottom = 128 * factor in
     let size' = size + border in
     { factor; true_size; size; border; border_bottom; size' }
 
