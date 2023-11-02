@@ -63,19 +63,6 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
     let+ () = Queue.verify_checksum free_queue in
     { root; files; free_queue }
 
-  let rec of_root root rollback_nb =
-    let open Lwt.Syntax in
-    let* t = unsafe_of_root root in
-    match t with
-    | Error (`Invalid_checksum _) ->
-      if rollback_nb > Root.nb
-      then Lwt_result.fail `All_generations_corrupted
-      else begin
-        Root.pred_gen root ;
-        of_root root (rollback_nb + 1)
-      end
-    | r -> Lwt_result.lift r
-
   let reachable_size t =
     let roots = Root.reachable_size t.root in
     let* payload =
@@ -92,20 +79,26 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
     in
     roots + queue + payload
 
-  let _check_size t =
-    let* rs = reachable_size t in
-    let+ s = Queue.size t.free_queue in
-    let expected_free =
-      Int64.add
-        (Int64.sub B.nb_sectors (B.Id.to_int64 t.free_queue.free_start))
-        (Int64.of_int s)
-    in
-    let used_space = Int64.to_int (Int64.sub B.nb_sectors expected_free) in
-    assert (used_space = rs) ;
-    assert (Int64.equal t.free_queue.free_sectors expected_free)
+  let check_size t =
+    (*
+       let* rs = reachable_size t in
+       let+ s = Queue.size t.free_queue in
+       let expected_free =
+       Int64.add
+       (Int64.sub B.nb_sectors (B.Id.to_int64 t.free_queue.free_start))
+       (Int64.of_int s)
+       in
+       let used_space = Int64.to_int (Int64.sub B.nb_sectors expected_free) in
+       assert (used_space = rs) ;
+       assert (Int64.equal t.free_queue.free_sectors expected_free)
+    *)
+    ignore reachable_size ;
+    ignore t ;
+    Lwt_result.return ()
 
   let of_root root =
-    let+ t = of_root root 0 in
+    let* t = unsafe_of_root root in
+    let+ () = check_size t in
     (B.allocator
        := fun required ->
             let t_free_queue = t.free_queue in
@@ -113,18 +106,13 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
             assert (t.free_queue == t_free_queue) ;
             t.free_queue <- free_queue ;
             allocated) ;
-    (* let+ () = check_size t in *)
     t
 
   let format () =
     let* root = Root.format () in
     of_root root
 
-  let of_block () =
-    Lwt.bind (Root.load ()) (function
-      | Ok root -> of_root root
-      | Error (`Invalid_checksum _) -> Lwt_result.fail `Disk_not_formatted
-      | Error e -> Lwt_result.fail e)
+  let of_block () = Root.load ~check:of_root ()
 
   let flush t =
     assert !B.safe_lru ;
@@ -145,12 +133,12 @@ module Make_disk (B : Context.A_DISK) : S with type error = B.error = struct
         let* payload_root, to_flush, allocated = Files.to_payload t.files allocated in
         assert (allocated = []) ;
         let* () = Root.flush (List.rev_append to_flush_queue to_flush) in
-        let+ free_queue = Root.update t.root ~queue:free_queue ~payload:payload_root in
+        let* free_queue = Root.update t.root ~queue:free_queue ~payload:payload_root in
         assert (B.acquire_discarded () = []) ;
         assert (t.free_queue == t_free_queue) ;
         t.free_queue <- free_queue ;
-        B.flush ()
-        (* check_size t *)
+        B.flush () ;
+        check_size t
       end
     in
     B.safe_lru := true ;
