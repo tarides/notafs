@@ -33,9 +33,13 @@ module type A_DISK = sig
     | `Invalid_checksum of Id.t
     | `All_generations_corrupted
     | `Disk_not_formatted
+    | `Wrong_page_size
+    | `Wrong_disk_size
     ]
 
+
   val page_size : int
+  val header_size : int
   val nb_sectors : int64
 
   type sector
@@ -88,6 +92,8 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
       | `Invalid_checksum of Id.t
       | `All_generations_corrupted
       | `Disk_not_formatted
+      | `Wrong_page_size
+      | `Wrong_disk_size
       ]
 
     type sector =
@@ -99,6 +105,7 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
              Lwt_result.t
       }
 
+    let header_size = 1
     let page_size = info.sector_size
     let nb_sectors = info.size_sectors
     let concurrent_reads = ref []

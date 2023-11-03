@@ -5,6 +5,7 @@ module Make (B : Mirage_block.S) : sig
   val of_block : ?factor:int -> B.t -> t Lwt.t
   val sleep : float ref
   val pause : bool ref
+  val set_window_size : (int * int) -> unit
   val do_pause : unit -> unit
 end = struct
   type bitmap = int array array
@@ -225,6 +226,9 @@ end = struct
   let disconnect t = B.disconnect t.block
   let sleep = ref 0.
   let pause = ref false
+
+  let set_window_size (x, y) =
+    G.resize_window x y
 
   let do_pause () =
     let exception Resume in

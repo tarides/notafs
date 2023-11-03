@@ -1,5 +1,3 @@
-let notafs_magic = 0x534641544F4EL (* NOTAFS *)
-
 module Leaf (B : Context.A_DISK) : sig
   module Schema : module type of Schema.Make (B)
   module Sector = Schema.Sector
@@ -9,7 +7,6 @@ module Leaf (B : Context.A_DISK) : sig
   type 'a io := ('a, B.error) Lwt_result.t
   type q := Sector.id * Sector.ptr * int64
 
-  val get_magic : t -> int64 io
   val get_free_queue : t -> q io
   val get_payload : t -> Sector.ptr io
   val generation : t -> int64 io
@@ -23,31 +20,27 @@ end = struct
   type t = Sector.t
 
   type schema =
-    { magic : int64 Schema.field
-    ; generation : int64 Schema.field
+    { generation : int64 Schema.field
     ; free_start : Sector.id Schema.field
     ; free_queue : Schema.ptr
     ; free_sectors : int64 Schema.field
     ; payload : Schema.ptr
     }
 
-  let { magic; generation; free_start; free_queue; free_sectors; payload } =
+  let { generation; free_start; free_queue; free_sectors; payload } =
     Schema.define
     @@
     let open Schema.Syntax in
-    let+ magic = Schema.uint64
-    and+ generation = Schema.uint64
+    let+ generation = Schema.uint64
     and+ free_start = Schema.id
     and+ free_queue = Schema.ptr
     and+ free_sectors = Schema.uint64
     and+ payload = Schema.ptr in
-    { magic; generation; free_start; free_queue; free_sectors; payload }
+    { generation; free_start; free_queue; free_sectors; payload }
 
   include struct
     open Schema.Infix
 
-    let set_magic t v = t.@(magic) <- v
-    let get_magic t = t.@(magic)
     let set_generation t v = t.@(generation) <- v
     let generation t = t.@(generation)
     let set_free_start t v = t.@(free_start) <- v
@@ -68,7 +61,6 @@ end = struct
 
   let create ~gen ~at (free_start, free_queue, free_sectors) payload =
     let* s = Sector.create ~at:(Sector.root_loc at) () in
-    let* () = set_magic s notafs_magic in
     let* () = set_generation s gen in
     let* () = set_free_start s free_start in
     let* () = set_free_queue s free_queue in
@@ -81,6 +73,7 @@ module Make (B : Context.A_DISK) = struct
   module Leaf = Leaf (B)
   module Schema = Leaf.Schema
   module Sector = Leaf.Sector
+  module Header = Header.Make(B)
   module Queue = Leaf.Queue
   open Lwt_result.Syntax
 
@@ -111,7 +104,8 @@ module Make (B : Context.A_DISK) = struct
     flush lst
 
   type t =
-    { mutable generation : Int64.t
+    { nb_roots : int
+    ; mutable generation : Int64.t
     ; mutable current : Leaf.t
     ; mutable parent_at : int
     ; mutable parent : Sector.t
@@ -138,7 +132,6 @@ module Make (B : Context.A_DISK) = struct
         | Ok v -> Lwt_result.return (Some v)
         | Error _ -> find_latest_generation ~check gs)
 
-  let nb_roots = 3
   let nb = 8
 
   let rec split_at n acc = function
@@ -146,7 +139,7 @@ module Make (B : Context.A_DISK) = struct
     | x :: xs -> split_at (n - 1) (x :: acc) xs
     | [] -> List.rev acc, []
 
-  let rec load_gens nb s i expected_gen acc =
+  let rec load_gens nb_roots nb s i expected_gen acc =
     let open Schema.Infix in
     if i >= nb
     then Lwt_result.return acc
@@ -154,13 +147,7 @@ module Make (B : Context.A_DISK) = struct
       let* at = s.@(Schema.nth generations i) in
       Lwt.bind
         (let* generation = Sector.load_root at in
-         let* magic = Leaf.get_magic generation in
          let* g = Leaf.generation generation in
-         let* () =
-           if magic <> notafs_magic
-           then Lwt_result.fail `Disk_not_formatted
-           else Lwt_result.return ()
-         in
          let+ () =
            if expected_gen <> g
            then Lwt_result.fail `Disk_not_formatted
@@ -170,34 +157,63 @@ module Make (B : Context.A_DISK) = struct
         (function
          | Ok (g, generation) ->
            let g =
-             { generation = g
+             { nb_roots = nb_roots
+             ; generation = g
              ; current = generation
              ; parent_at = Int64.to_int @@ B.Id.to_int64 @@ Sector.force_id s
              ; parent = s
              ; current_idx = i
              }
            in
-           load_gens nb s (i + 1) (Int64.succ expected_gen) (g :: acc)
-         | Error _ -> load_gens nb s (i + 1) (Int64.succ expected_gen) acc)
+           load_gens nb_roots nb s (i + 1) (Int64.succ expected_gen) (g :: acc)
+         | Error _ -> load_gens nb_roots nb s (i + 1) (Int64.succ expected_gen) acc)
 
-  let rec load_roots i acc =
+  let load_header () =
+    let* s = Sector.load_root (B.Id.of_int 0) in
+    (* check magic number *)
+    let* magic = Header.get_magic s in
+    let* () =
+      if magic <> Header.magic
+      then Lwt_result.fail `Disk_not_formatted
+      else Lwt_result.return ()
+    in
+    (* check page size *)
+    let* page_size = Header.get_page_size s in
+    let* () =
+      if page_size <> B.page_size
+      then Lwt_result.fail `Wrong_page_size
+      else Lwt_result.return ()
+    in
+    (* check disk size *)
+    let* disk_size = Header.get_disk_size s in
+    Fmt.pr "%a - %a@." Fmt.int64 disk_size Fmt.int64 B.nb_sectors;
+    let+ () =
+      if disk_size <> B.nb_sectors
+      then Lwt_result.fail `Wrong_disk_size
+      else Lwt_result.return ()
+    in
+    s
+
+  let rec load_roots nb_roots i acc =
     if i >= nb_roots
     then Lwt_result.return acc
     else
-      let* s = Sector.load_root (B.Id.of_int i) in
+      let* s = Sector.load_root (B.Id.of_int (i + B.header_size)) in
       let open Schema.Infix in
       let* first_gen = s.@(first_generation) in
-      load_roots (i + 1) ((first_gen, s) :: acc)
+      load_roots nb_roots (i + 1) ((first_gen, s) :: acc)
 
   let load ~check () =
-    let* roots = load_roots 0 [] in
+    let* header = load_header () in
+    let* nb_roots = Header.get_roots header in
+    let* roots = load_roots nb_roots 0 [] in
     let roots = List.sort (fun (a, _) (b, _) -> Int64.compare b a) roots in
     let rec find_latest = function
       | [] -> failwith "Root.load: no valid generation"
       | (first_gen, parent) :: rest ->
         let open Schema.Infix in
         let* nb = parent.@(generations.length) in
-        let* generations = load_gens nb parent 0 first_gen [] in
+        let* generations = load_gens nb_roots nb parent 0 first_gen [] in
         let* found = find_latest_generation ~check generations in
         begin
           match found with
@@ -207,21 +223,27 @@ module Make (B : Context.A_DISK) = struct
     in
     find_latest roots
 
-  let rec create_roots i acc =
+  let create_header ~disk_size ~page_size =
+    let+ h = Header.create ~disk_size ~page_size in
+    h
+
+  let rec create_roots nb_roots i acc =
     if i >= nb_roots
     then Lwt_result.return acc
     else
-      let* s = Sector.create ~at:(Sector.root_loc @@ B.Id.of_int i) () in
+      let* s = Sector.create ~at:(Sector.root_loc @@ B.Id.of_int (i + B.header_size)) () in
       let open Schema.Infix in
       let* () = s.@(first_generation) <- Int64.zero in
       let* () = s.@(generations.length) <- 0 in
-      create_roots (i + 1) (s :: acc)
+      create_roots nb_roots (i + 1) (s :: acc)
 
   let format () =
-    let used = nb_roots + nb in
+    let* header = create_header ~page_size:B.page_size ~disk_size:B.nb_sectors in
+    let* nb_roots = Header.get_roots header in
+    let used = nb_roots + nb + B.header_size in
     let free_start = B.Id.of_int used in
     let free_sectors = Int64.sub B.nb_sectors (Int64.of_int used) in
-    let* roots = create_roots 0 [] in
+    let* roots = create_roots nb_roots 0 [] in
     let s0 = List.hd roots in
     let open Schema.Infix in
     let* () = s0.@(first_generation) <- Int64.one in
@@ -231,10 +253,10 @@ module Make (B : Context.A_DISK) = struct
       then Lwt_result.return ()
       else begin
         let* fake =
-          Sector.create ~at:(Sector.root_loc @@ B.Id.of_int (i + nb_roots)) ()
+          Sector.create ~at:(Sector.root_loc @@ B.Id.of_int (i + nb_roots + B.header_size)) ()
         in
         let* () = Sector.write_root fake in
-        let* () = s0.@(Schema.nth generations i) <- B.Id.of_int (i + nb_roots) in
+        let* () = s0.@(Schema.nth generations i) <- B.Id.of_int (i + nb_roots + B.header_size) in
         go (i + 1)
       end
     in
@@ -253,8 +275,10 @@ module Make (B : Context.A_DISK) = struct
         let* () = Sector.write_root r in
         write_all rs
     in
+    let* () = Sector.write_root header in
     let+ () = write_all (first :: roots) in
-    { generation = Int64.one
+    { nb_roots = nb_roots
+    ; generation = Int64.one
     ; current = first
     ; parent_at = 0
     ; parent = s0
@@ -272,8 +296,8 @@ module Make (B : Context.A_DISK) = struct
       if t.current_idx < max_gens
       then Lwt_result.return queue
       else begin
-        t.parent_at <- (t.parent_at + 1) mod nb_roots ;
-        let* s1 = Sector.create ~at:(Sector.root_loc @@ B.Id.of_int t.parent_at) () in
+        t.parent_at <- (t.parent_at + 1) mod t.nb_roots ;
+        let* s1 = Sector.create ~at:(Sector.root_loc @@ B.Id.of_int (t.parent_at + B.header_size)) () in
         t.parent <- s1 ;
         let* queue, free_gens = Queue.pop_front queue nb in
         let* () = s1.@(generations.length) <- nb in
@@ -326,5 +350,5 @@ module Make (B : Context.A_DISK) = struct
     let _ = failwith "todo: update current!" in
     t.generation <- Int64.pred t.generation
 
-  let reachable_size t = nb_roots + nb - t.current_idx
+  let reachable_size t = t.nb_roots + nb - t.current_idx
 end
