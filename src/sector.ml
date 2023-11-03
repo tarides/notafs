@@ -23,7 +23,7 @@ module Make (B : Context.A_DISK) : sig
 
   val root_loc : id -> loc
   val create : ?at:loc -> unit -> t r
-  val load_root : id -> t r
+  val load_root : ?check:bool -> id -> t r
   val load : ptr -> t r
   val write_root : t -> unit r
   val to_write : t -> (id * Cstruct.t) r
@@ -144,17 +144,6 @@ end = struct
 
   let ro_cstruct t = B.cstruct t.cstruct
 
-  let verify_checksum t =
-    match t.id, t.checksum with
-    | At id, Some cs ->
-      let* cstruct = ro_cstruct t in
-      let cs' = get_checksum cstruct in
-      if C.equal cs cs'
-      then Lwt_result.return ()
-      else Lwt_result.fail (`Invalid_checksum id)
-    | In_memory, None -> Lwt_result.return ()
-    | _ -> assert false
-
   let root_checksum_offset = B.page_size - C.byte_size
 
   let compute_root_checksum cstruct =
@@ -169,7 +158,19 @@ end = struct
     then Lwt_result.return ()
     else Lwt_result.fail (`Invalid_checksum id)
 
-  let root_loc i = Root i
+  let verify_checksum t =
+    match t.id, t.checksum with
+    | At id, Some cs ->
+      let* cstruct = ro_cstruct t in
+      let cs' = get_checksum cstruct in
+      if C.equal cs cs'
+      then Lwt_result.return ()
+      else Lwt_result.fail (`Invalid_checksum id)
+    | Root id, None -> check_root_checksum ~id t.cstruct
+    | In_memory, None -> Lwt_result.return ()
+    | _ -> assert false
+
+    let root_loc i = Root i
 
   let is_in_memory t =
     match t.id with
@@ -432,9 +433,9 @@ end = struct
     let+ () = B.read id cstruct in
     sector
 
-  let load_root id =
+  let load_root ?(check = true) id =
     let* cstruct = read ~from:`Root id in
-    let+ () = check_root_checksum ~id cstruct in
+    let+ () = if check then check_root_checksum ~id cstruct else Lwt_result.return () in
     let t =
       { id = Root id
       ; cstruct

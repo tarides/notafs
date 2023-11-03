@@ -169,7 +169,7 @@ module Make (B : Context.A_DISK) = struct
          | Error _ -> load_gens nb_roots nb s (i + 1) (Int64.succ expected_gen) acc)
 
   let load_header () =
-    let* s = Sector.load_root (B.Id.of_int 0) in
+    let* s = Sector.load_root ~check:false (B.Id.of_int 0) in
     (* check magic number *)
     let* magic = Header.get_magic s in
     let* () =
@@ -186,12 +186,12 @@ module Make (B : Context.A_DISK) = struct
     in
     (* check disk size *)
     let* disk_size = Header.get_disk_size s in
-    Fmt.pr "%a - %a@." Fmt.int64 disk_size Fmt.int64 B.nb_sectors;
-    let+ () =
+    let* () =
       if disk_size <> B.nb_sectors
       then Lwt_result.fail `Wrong_disk_size
       else Lwt_result.return ()
     in
+    let+ () = Sector.verify_checksum s in
     s
 
   let rec load_roots nb_roots i acc =
