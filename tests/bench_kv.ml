@@ -110,9 +110,9 @@ module Test (Kv : Mirage_kv.RW) = struct
     Lwt.return_unit
 end
 
-module Notafs_kv = Notafs.KV (Block)
+module Notafs_kv = Notafs.KV (Notafs.No_checksum) (Block)
+module Notafs_kv_crc = Notafs.KV (Notafs.Adler32) (Block)
 module Test_notafs = Test (Notafs_kv)
-module Notafs_kv_crc = Notafs.Make_kv (Notafs.Adler32) (Block)
 module Test_notafs_crc = Test (Notafs_kv_crc)
 module Tar_kv = Tar_mirage.Make_KV_RW (Pclock) (Block)
 module Test_tar = Test (Tar_kv)
@@ -131,7 +131,7 @@ let main () =
     Lwt.return ()
   in
   let* () =
-    let* fs = no_error @@ Notafs_kv.of_block block in
+    let* fs = no_error @@ Notafs_kv.connect block in
     Format.printf "@.--- Notafs without checksum:@." ;
     let* () = Test_notafs.main fs in
     Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Notafs_kv.stats fs) ;

@@ -5,4 +5,4 @@ module Block = struct
   let flush _ = ()
 end
 
-module Disk = Notafs.Make_kv (Notafs.Adler32) (Block)
+module Disk = Notafs.KV (Notafs.Adler32) (Block)

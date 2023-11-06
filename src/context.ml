@@ -37,7 +37,6 @@ module type A_DISK = sig
     | `Wrong_disk_size
     ]
 
-
   val page_size : int
   val header_size : int
   val nb_sectors : int64

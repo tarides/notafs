@@ -73,7 +73,7 @@ module Make (B : Context.A_DISK) = struct
   module Leaf = Leaf (B)
   module Schema = Leaf.Schema
   module Sector = Leaf.Sector
-  module Header = Header.Make(B)
+  module Header = Header.Make (B)
   module Queue = Leaf.Queue
   open Lwt_result.Syntax
 
@@ -157,7 +157,7 @@ module Make (B : Context.A_DISK) = struct
         (function
          | Ok (g, generation) ->
            let g =
-             { nb_roots = nb_roots
+             { nb_roots
              ; generation = g
              ; current = generation
              ; parent_at = Int64.to_int @@ B.Id.to_int64 @@ Sector.force_id s
@@ -231,7 +231,9 @@ module Make (B : Context.A_DISK) = struct
     if i >= nb_roots
     then Lwt_result.return acc
     else
-      let* s = Sector.create ~at:(Sector.root_loc @@ B.Id.of_int (i + B.header_size)) () in
+      let* s =
+        Sector.create ~at:(Sector.root_loc @@ B.Id.of_int (i + B.header_size)) ()
+      in
       let open Schema.Infix in
       let* () = s.@(first_generation) <- Int64.zero in
       let* () = s.@(generations.length) <- 0 in
@@ -253,10 +255,14 @@ module Make (B : Context.A_DISK) = struct
       then Lwt_result.return ()
       else begin
         let* fake =
-          Sector.create ~at:(Sector.root_loc @@ B.Id.of_int (i + nb_roots + B.header_size)) ()
+          Sector.create
+            ~at:(Sector.root_loc @@ B.Id.of_int (i + nb_roots + B.header_size))
+            ()
         in
         let* () = Sector.write_root fake in
-        let* () = s0.@(Schema.nth generations i) <- B.Id.of_int (i + nb_roots + B.header_size) in
+        let* () =
+          s0.@(Schema.nth generations i) <- B.Id.of_int (i + nb_roots + B.header_size)
+        in
         go (i + 1)
       end
     in
@@ -277,7 +283,7 @@ module Make (B : Context.A_DISK) = struct
     in
     let* () = Sector.write_root header in
     let+ () = write_all (first :: roots) in
-    { nb_roots = nb_roots
+    { nb_roots
     ; generation = Int64.one
     ; current = first
     ; parent_at = 0
@@ -297,7 +303,11 @@ module Make (B : Context.A_DISK) = struct
       then Lwt_result.return queue
       else begin
         t.parent_at <- (t.parent_at + 1) mod t.nb_roots ;
-        let* s1 = Sector.create ~at:(Sector.root_loc @@ B.Id.of_int (t.parent_at + B.header_size)) () in
+        let* s1 =
+          Sector.create
+            ~at:(Sector.root_loc @@ B.Id.of_int (t.parent_at + B.header_size))
+            ()
+        in
         t.parent <- s1 ;
         let* queue, free_gens = Queue.pop_front queue nb in
         let* () = s1.@(generations.length) <- nb in

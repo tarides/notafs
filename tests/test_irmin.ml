@@ -178,12 +178,18 @@ let stress =
   Arg.(value & opt bool false & info [ "stress" ] ~docv:"stress" ~doc:"stress test")
 
 let window_size =
-  Arg.(value & opt (some (pair ~sep:',' int int)) None & info [ "w"; "window_size" ] ~docv:"window_size" ~doc:"size of the window, a pair of integers separated by a coma")
+  Arg.(
+    value
+    & opt (some (pair ~sep:',' int int)) None
+    & info
+        [ "w"; "window_size" ]
+        ~docv:"window_size"
+        ~doc:"size of the window, a pair of integers separated by a coma")
 
 let main sleep pause factor stress window_size =
   B.sleep := sleep ;
   B.pause := pause ;
-  Option.iter B.set_window_size window_size;
+  Option.iter B.set_window_size window_size ;
   Lwt_main.run
   @@ Lwt_direct.indirect
   @@ fun () -> Eio_mock.Backend.run @@ main ~fresh:true ~factor ~stress

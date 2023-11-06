@@ -5,7 +5,7 @@ module Make (B : Context.A_DISK) : sig
   type t = Sector.t
   type 'a io := ('a, B.error) Lwt_result.t
 
-  val magic: int64
+  val magic : int64
   val get_magic : t -> int64 io
   val get_disk_size : t -> int64 io
   val get_page_size : t -> int io

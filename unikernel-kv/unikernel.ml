@@ -8,7 +8,7 @@ module Main (Block : Mirage_block.S) = struct
     let flush _ = ()
   end
 
-  module Kv = Notafs.KV (Block)
+  module Kv = Notafs.KV (Notafs.No_checksum) (Block)
 
   let force lwt =
     let open Lwt.Infix in

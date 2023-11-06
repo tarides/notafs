@@ -143,7 +143,6 @@ end = struct
   open Lwt_result.Syntax
 
   let ro_cstruct t = B.cstruct t.cstruct
-
   let root_checksum_offset = B.page_size - C.byte_size
 
   let compute_root_checksum cstruct =
@@ -170,7 +169,7 @@ end = struct
     | In_memory, None -> Lwt_result.return ()
     | _ -> assert false
 
-    let root_loc i = Root i
+  let root_loc i = Root i
 
   let is_in_memory t =
     match t.id with
