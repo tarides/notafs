@@ -5,13 +5,15 @@ let on_error s = function
   | Ok () -> ()
   | Error err -> Fmt.pr "Encountered error in %S: %a@." s Disk.pp_error err
 
-let format path =
-  let format path =
-    let* block = Lwt_result.ok (Block.connect path) in
+let format path page_size =
+  let format () =
+    let* block =
+      Lwt_result.ok (Block.connect ~prefered_sector_size:(Some page_size) path)
+    in
     let+ _disk = Disk.format block in
     Fmt.pr "Disk at %S succesfully formatted@." path
   in
-  on_error "format" @@ Lwt_main.run (format path)
+  on_error "format" @@ Lwt_main.run (format ())
 
 let string_of_disk_space space =
   let kb = 1024L in
@@ -38,37 +40,37 @@ let info_cmd disk =
   on_error "info" @@ Lwt_main.run (infos ())
 
 let touch disk path =
-  let touch path =
+  let touch () =
     let k = Mirage_kv.Key.v path in
     let+ () = Disk.set disk k "" in
     Fmt.pr "File %S created@." path
   in
-  on_error "touch" @@ Lwt_main.run (touch path)
+  on_error "touch" @@ Lwt_main.run (touch ())
 
 let remove disk path =
-  let remove path =
+  let remove () =
     let k = Mirage_kv.Key.v path in
     let+ () = Disk.remove disk k in
     Fmt.pr "File %S removed@." path
   in
-  on_error "remove" @@ Lwt_main.run (remove path)
+  on_error "remove" @@ Lwt_main.run (remove ())
 
 let rename disk path_from path_to =
-  let rename path_from path_to =
+  let rename () =
     let source = Mirage_kv.Key.v path_from in
     let dest = Mirage_kv.Key.v path_to in
     let+ () = Disk.rename disk ~source ~dest in
     Fmt.pr "File %S renamed to %S@." path_from path_to
   in
-  on_error "rename" @@ Lwt_main.run (rename path_from path_to)
+  on_error "rename" @@ Lwt_main.run (rename ())
 
 let cat disk path =
-  let cat path =
+  let cat () =
     let key = Mirage_kv.Key.v path in
     let+ get = Disk.get disk key in
     Fmt.pr "%s" get
   in
-  on_error "cat" @@ Lwt_main.run (cat path)
+  on_error "cat" @@ Lwt_main.run (cat ())
 
 let copy_to_disk disk path_from path_to =
   let key = Mirage_kv.Key.v path_to in
@@ -106,7 +108,7 @@ let copy_from_disk_to_disk disk path_from path_to =
   Fmt.pr "Key %S has been copied to key %S@." path_from path_to
 
 let copy disk path_from path_to =
-  let copy path_from path_to =
+  let copy () =
     let disk_id = "@" in
     let disk_id_len = String.length disk_id in
     match
@@ -133,20 +135,20 @@ let copy disk path_from path_to =
         (`Unsupported_operation
           (Fmt.str "No disk paths (prefix disk paths with %S)@." disk_id))
   in
-  on_error "copy" @@ Lwt_main.run (copy path_from path_to)
+  on_error "copy" @@ Lwt_main.run (copy ())
 
 let stats disk path =
-  let cat path =
+  let cat () =
     let key = Mirage_kv.Key.v path in
     (* let* last_modified = Disk.last_modified disk key in *)
     let+ size = Disk.size disk key in
     Fmt.pr "Size: %a@." Optint.Int63.pp size ;
     Fmt.pr "Last modified: %s@." "<Not Supported Yet>"
   in
-  on_error "stats" @@ Lwt_main.run (cat path)
+  on_error "stats" @@ Lwt_main.run (cat ())
 
 let list disk path =
-  let list path =
+  let list () =
     let open Lwt_result.Syntax in
     let k = Mirage_kv.Key.v path in
     let+ files = Disk.list disk k in
@@ -157,7 +159,7 @@ let list disk path =
     in
     List.iter (fun (key, t) -> Fmt.pr "%a@." (styled t Mirage_kv.Key.pp) key) files
   in
-  on_error "list" @@ Lwt_main.run (list path)
+  on_error "list" @@ Lwt_main.run (list ())
 
 open Cmdliner
 (** Commands *)
@@ -165,10 +167,16 @@ open Cmdliner
 open Common_args
 
 (* Format *)
+let page_size =
+  Arg.(
+    value
+    & opt int 512
+    & info [ "p"; "page_size" ] ~docv:"page_size" ~doc:"size of the disk's page")
+
 let format_cmd =
   let doc = "formats a disk for further use" in
   let info = Cmd.info "format" ~doc in
-  Cmd.v info Term.(const format $ disk_path)
+  Cmd.v info Term.(const format $ disk_path $ page_size)
 
 (* Info *)
 let info_cmd =

@@ -10,7 +10,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     | `Invalid_checksum of Int64.t
     | `All_generations_corrupted
     | `Disk_not_formatted
-    | `Wrong_page_size
+    | `Wrong_page_size of int
     | `Wrong_disk_size
     | `Unsupported_operation of string
     | `Disk_failed
@@ -26,7 +26,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     | `Invalid_checksum id -> Format.fprintf h "Invalid_checksum %s" (Int64.to_string id)
     | `All_generations_corrupted -> Format.fprintf h "All_generations_corrupted"
     | `Disk_not_formatted -> Format.fprintf h "Disk_not_formatted"
-    | `Wrong_page_size -> Format.fprintf h "Wrong_page_size"
+    | `Wrong_page_size s -> Format.fprintf h "Wrong_page_size %d" s
     | `Wrong_disk_size -> Format.fprintf h "Wrong_disk_size"
     | `Unsupported_operation msg -> Format.fprintf h "Unsupported_operation %S" msg
     | `Disk_failed -> Format.fprintf h "Disk_failed"
@@ -43,8 +43,8 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     | Error (`Invalid_checksum id) -> Error (`Invalid_checksum (to_int64 id))
     | Error (`Read _read_error) -> Error `Disk_failed
     | Error (`Write _write_error) -> Error `Disk_failed
+    | Error (`Wrong_page_size s) -> Error (`Wrong_page_size s)
     | Error `Wrong_disk_size -> Error `Wrong_disk_size
-    | Error `Wrong_page_size -> Error `Wrong_page_size
 
   type t = T : (module S with type t = 'a) * 'a -> t
 

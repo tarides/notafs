@@ -1,16 +1,24 @@
 open Cmdliner
 open Context
 
+let return_disk = function
+  | Error err ->
+    Fmt.pr "Disk connect failed: %a@." Disk.pp_error err ;
+    exit 1
+  | Ok disk -> Lwt.return disk
+
 let connect_disk disk_path =
   let make_disk =
     let open Lwt.Syntax in
     let* block = Block.connect disk_path in
     let disk = Disk.connect block in
     Lwt.bind disk (function
-      | Error err ->
-        Fmt.pr "Encountered error: %a@." Disk.pp_error err ;
-        exit 1
-      | Ok disk -> Lwt.return disk)
+      | Error (`Wrong_page_size page_size) ->
+        let* () = Block.disconnect block in
+        let* block = Block.connect ~prefered_sector_size:(Some page_size) disk_path in
+        let disk = Disk.connect block in
+        Lwt.bind disk return_disk
+      | r -> return_disk r)
   in
   Lwt_main.run make_disk
 

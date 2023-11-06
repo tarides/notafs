@@ -9,7 +9,7 @@ module Make (Check : Main.CHECKSUM) (Block : Main.DISK) : sig
     | `Invalid_checksum of Int64.t
     | `All_generations_corrupted
     | `Disk_not_formatted
-    | `Wrong_page_size
+    | `Wrong_page_size of int
     | `Wrong_disk_size
     | `Unsupported_operation of string
     | `Disk_failed

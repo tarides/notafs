@@ -65,8 +65,10 @@ Now that you have a disk, you will need to format it: It is a mandatory step, ot
 
 ```shell
 # Format the disk
-notafs/ $ notafs-cli format -d/tmp/storage
+notafs/ $ notafs-cli format -d/tmp/storage -p4096
 ```
+
+The flag `-p` represents the size of the pages of your disk. It is optional and set at 512 by default.
 
 With a formatted disk, you can fill-in your disk with the following commands:
 
@@ -98,6 +100,9 @@ notafs/ $ notafs-cli copy -d/tmp/storage @bar goo
 Lastly those functions will help you have a better understanding of the content of the disk and it's files:
 
 ```shell
+# Dump general informations on the disk into the standard output:
+notafs/ $ notafs-cli info -d/tmp/storage
+
 # Dump a file `foo` from the disk into the standard output:
 notafs/ $ notafs-cli cat -d/tmp/storage foo
 

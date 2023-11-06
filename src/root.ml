@@ -181,7 +181,7 @@ module Make (B : Context.A_DISK) = struct
     let* page_size = Header.get_page_size s in
     let* () =
       if page_size <> B.page_size
-      then Lwt_result.fail `Wrong_page_size
+      then Lwt_result.fail (`Wrong_page_size page_size)
       else Lwt_result.return ()
     in
     (* check disk size *)
