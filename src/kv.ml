@@ -13,7 +13,6 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     | `Wrong_page_size of int
     | `Wrong_disk_size
     | `Unsupported_operation of string
-    | `Disk_failed
     ]
 
   type write_error = error
@@ -29,11 +28,10 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     | `Wrong_page_size s -> Format.fprintf h "Wrong_page_size %d" s
     | `Wrong_disk_size -> Format.fprintf h "Wrong_disk_size"
     | `Unsupported_operation msg -> Format.fprintf h "Unsupported_operation %S" msg
-    | `Disk_failed -> Format.fprintf h "Disk_failed"
 
   let pp_write_error = pp_error
 
-  let lift_error to_int64 lwt =
+  let lift_error to_int64 lwt : (_, error) Lwt_result.t =
     let open Lwt.Syntax in
     let+ r = lwt in
     match r with
@@ -41,26 +39,32 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     | Error `All_generations_corrupted -> Error `All_generations_corrupted
     | Error `Disk_not_formatted -> Error `Disk_not_formatted
     | Error (`Invalid_checksum id) -> Error (`Invalid_checksum (to_int64 id))
-    | Error (`Read _read_error) -> Error `Disk_failed
-    | Error (`Write _write_error) -> Error `Disk_failed
+    | Error (`Read e) -> Error (`Read e)
+    | Error (`Write e) -> Error (`Write e)
     | Error (`Wrong_page_size s) -> Error (`Wrong_page_size s)
     | Error `Wrong_disk_size -> Error `Wrong_disk_size
 
+  module type S =
+    Main.S
+      with type Disk.read_error = Block.error
+       and type Disk.write_error = Block.write_error
+
   type t = T : (module S with type t = 'a) * 'a -> t
 
-  let format block =
+  let make_disk block =
     let open Lwt.Syntax in
-    let* (module A_disk) = Context.of_impl (module Block) (module Check) block in
-    let (module S) = (module Make_disk (A_disk) : S) in
+    let+ (module A_disk) = Context.of_impl (module Block) (module Check) block in
+    Ok (module Make_disk (A_disk) : S)
+
+  let format block =
     let open Lwt_result.Syntax in
+    let* (module S) = make_disk block in
     let+ (t : S.t) = lift_error S.Disk.Id.to_int64 @@ S.format () in
     T ((module S), t)
 
   let connect block =
-    let open Lwt.Syntax in
-    let* (module A_disk) = Context.of_impl (module Block) (module Check) block in
-    let (module S) = (module Make_disk (A_disk) : S) in
     let open Lwt_result.Syntax in
+    let* (module S) = make_disk block in
     let+ (t : S.t) = lift_error S.Disk.Id.to_int64 @@ S.of_block () in
     T ((module S), t)
 

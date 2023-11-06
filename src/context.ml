@@ -1,8 +1,26 @@
-module type DISK = sig
-  include Mirage_block.S
+module type DISK_EXTENSIONS = sig
+  (* to remove, only used for [block_viz] debugging *)
+  type t
 
   val discard : t -> Int64.t -> unit
   val flush : t -> unit
+end
+
+module type DISK = sig
+  include Mirage_block.S
+  include DISK_EXTENSIONS with type t := t
+end
+
+module type SIMPLE_DISK = sig
+  type error
+  type write_error
+  type t
+
+  val get_info : t -> Mirage_block.info Lwt.t
+  val read : t -> int64 -> Cstruct.t list -> (unit, error) result Lwt.t
+  val write : t -> int64 -> Cstruct.t list -> (unit, write_error) result Lwt.t
+
+  include DISK_EXTENSIONS with type t := t
 end
 
 module type CHECKSUM = sig
@@ -24,8 +42,8 @@ module type A_DISK = sig
   val stats : Stats.t
   val dirty : bool ref
 
-  type read_error = private [> Mirage_block.error ]
-  type write_error = private [> Mirage_block.write_error ]
+  type read_error
+  type write_error
 
   type error =
     [ `Read of read_error
@@ -64,8 +82,11 @@ module type A_DISK = sig
     -> unit
 end
 
-let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (disk : t)
-  : (module A_DISK) Lwt.t
+let of_impl
+  (type t e we)
+  (module B : SIMPLE_DISK with type t = t and type error = e and type write_error = we)
+  (module C : CHECKSUM)
+  (disk : t)
   =
   let open Lwt.Syntax in
   let+ info = B.get_info disk in
@@ -377,4 +398,6 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
         let+ () = read page_id cstruct in
         sector.cstruct <- Cstruct cstruct ;
         cstruct
-  end : A_DISK)
+  end : A_DISK
+    with type read_error = e
+     and type write_error = we)

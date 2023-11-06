@@ -12,7 +12,6 @@ module Make (Check : Main.CHECKSUM) (Block : Main.DISK) : sig
     | `Wrong_page_size of int
     | `Wrong_disk_size
     | `Unsupported_operation of string
-    | `Disk_failed
     ]
 
   type write_error = error

@@ -33,7 +33,7 @@ module type S = sig
   val list : t -> string -> (string * [ `Value | `Dictionary ]) list
 end
 
-module Make_disk (B : Context.A_DISK) : S = struct
+module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
   module Disk = B
   module Sector = Sector.Make (B)
   module Root = Root.Make (B)
