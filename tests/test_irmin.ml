@@ -1,3 +1,8 @@
+(* TODO: Create a small disk
+
+   $ dd if=/dev/zero of=/tmp/notafs-irmin count=400
+*)
+
 module B = Block_viz.Make (Block)
 
 module Clock = struct
