@@ -161,6 +161,12 @@ let main ~fresh ~factor ~stress () =
   done ;
   ()
 
+let main ~fresh ~factor ~stress () =
+  try main ~fresh ~factor ~stress () with
+  | Store.Maker.Fs.Fs err as exn ->
+    Format.printf "ERROR: %a@." Store.Maker.Fs.pp_error err ;
+    raise exn
+
 (* cmdliner *)
 open Cmdliner
 

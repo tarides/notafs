@@ -149,22 +149,20 @@ end = struct
     C.write cstruct root_checksum_offset C.default ;
     C.digest_bigstring (cstruct_to_bigarray cstruct) 0 B.page_size C.default
 
+  let invalid_checksum id = Lwt_result.fail (`Invalid_checksum (B.Id.to_int64 id))
+
   let check_root_checksum ~id cstruct =
     let* cstruct = B.cstruct cstruct in
     let cs = C.read cstruct root_checksum_offset in
     let expected = compute_root_checksum cstruct in
-    if C.equal cs expected
-    then Lwt_result.return ()
-    else Lwt_result.fail (`Invalid_checksum id)
+    if C.equal cs expected then Lwt_result.return () else invalid_checksum id
 
   let verify_checksum t =
     match t.id, t.checksum with
     | At id, Some cs ->
       let* cstruct = ro_cstruct t in
       let cs' = get_checksum cstruct in
-      if C.equal cs cs'
-      then Lwt_result.return ()
-      else Lwt_result.fail (`Invalid_checksum id)
+      if C.equal cs cs' then Lwt_result.return () else invalid_checksum id
     | Root id, None -> check_root_checksum ~id t.cstruct
     | In_memory, None -> Lwt_result.return ()
     | _ -> assert false

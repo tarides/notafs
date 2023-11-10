@@ -48,9 +48,10 @@ module type A_DISK = sig
   type error =
     [ `Read of read_error
     | `Write of write_error
-    | `Invalid_checksum of Id.t
+    | `Invalid_checksum of Int64.t
     | `All_generations_corrupted
     | `Disk_not_formatted
+    | `Disk_is_full
     | `Wrong_page_size of int
     | `Wrong_disk_size
     ]
@@ -109,8 +110,9 @@ let of_impl
     type error =
       [ `Read of read_error
       | `Write of write_error
-      | `Invalid_checksum of Id.t
+      | `Invalid_checksum of Int64.t
       | `All_generations_corrupted
+      | `Disk_is_full
       | `Disk_not_formatted
       | `Wrong_page_size of int
       | `Wrong_disk_size

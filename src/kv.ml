@@ -31,14 +31,15 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
 
   let pp_write_error = pp_error
 
-  let lift_error to_int64 lwt : (_, error) Lwt_result.t =
+  let lift_error lwt : (_, error) Lwt_result.t =
     let open Lwt.Syntax in
     let+ r = lwt in
     match r with
     | Ok v -> Ok v
     | Error `All_generations_corrupted -> Error `All_generations_corrupted
+    | Error `Disk_is_full -> Error `No_space
     | Error `Disk_not_formatted -> Error `Disk_not_formatted
-    | Error (`Invalid_checksum id) -> Error (`Invalid_checksum (to_int64 id))
+    | Error (`Invalid_checksum id) -> Error (`Invalid_checksum id)
     | Error (`Read e) -> Error (`Read e)
     | Error (`Write e) -> Error (`Write e)
     | Error (`Wrong_page_size s) -> Error (`Wrong_page_size s)
@@ -59,16 +60,16 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
   let format block =
     let open Lwt_result.Syntax in
     let* (module S) = make_disk block in
-    let+ (t : S.t) = lift_error S.Disk.Id.to_int64 @@ S.format () in
+    let+ (t : S.t) = lift_error @@ S.format () in
     T ((module S), t)
 
   let connect block =
     let open Lwt_result.Syntax in
     let* (module S) = make_disk block in
-    let+ (t : S.t) = lift_error S.Disk.Id.to_int64 @@ S.of_block () in
+    let+ (t : S.t) = lift_error @@ S.of_block () in
     T ((module S), t)
 
-  let flush (T ((module S), t)) = lift_error S.Disk.Id.to_int64 @@ S.flush t
+  let flush (T ((module S), t)) = lift_error @@ S.flush t
   let disk_space (T ((module S), t)) = S.disk_space t
   let free_space (T ((module S), t)) = S.free_space t
   let page_size (T ((module S), t)) = S.page_size t
@@ -86,11 +87,9 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     match S.find_opt t filename with
     | None -> Lwt_result.fail (`Not_found key)
     | Some file ->
-      let* size = lift_error S.Disk.Id.to_int64 @@ S.size file in
+      let* size = lift_error @@ S.size file in
       let bytes = Bytes.create size in
-      let+ quantity =
-        lift_error S.Disk.Id.to_int64 @@ S.blit_to_bytes file bytes ~off:0 ~len:size
-      in
+      let+ quantity = lift_error @@ S.blit_to_bytes file bytes ~off:0 ~len:size in
       assert (quantity = size) ;
       Bytes.unsafe_to_string bytes
 
@@ -99,14 +98,12 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     match S.find_opt t filename with
     | None -> Lwt_result.fail (`Not_found key)
     | Some file ->
-      let* size = lift_error S.Disk.Id.to_int64 @@ S.size file in
+      let* size = lift_error @@ S.size file in
       let off = Optint.Int63.to_int offset in
       assert (off >= 0) ;
       assert (off + length <= size) ;
       let bytes = Bytes.create length in
-      let+ quantity =
-        lift_error S.Disk.Id.to_int64 @@ S.blit_to_bytes file bytes ~off ~len:length
-      in
+      let+ quantity = lift_error @@ S.blit_to_bytes file bytes ~off ~len:length in
       assert (quantity = size) ;
       Bytes.unsafe_to_string bytes
 
@@ -128,7 +125,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     match S.find_opt t filename with
     | None -> Lwt_result.fail (`Not_found key)
     | Some file ->
-      let+ size = lift_error S.Disk.Id.to_int64 @@ S.size file in
+      let+ size = lift_error @@ S.size file in
       Optint.Int63.of_int size
 
   let allocate (T ((module S), t)) key ?last_modified:_ size =
@@ -138,7 +135,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     | None ->
       let size = Optint.Int63.to_int size in
       let contents = String.make size '\000' in
-      let+ _ = lift_error S.Disk.Id.to_int64 @@ S.touch t filename contents in
+      let+ _ = lift_error @@ S.touch t filename contents in
       ()
 
   let set (T ((module S), t)) key contents =
@@ -146,10 +143,10 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     let* () =
       match S.find_opt t filename with
       | None -> Lwt_result.return ()
-      | Some _ -> lift_error S.Disk.Id.to_int64 @@ S.remove t filename
+      | Some _ -> lift_error @@ S.remove t filename
     in
-    let* _ = lift_error S.Disk.Id.to_int64 @@ S.touch t filename contents in
-    lift_error S.Disk.Id.to_int64 @@ S.flush t
+    let* _ = lift_error @@ S.touch t filename contents in
+    lift_error @@ S.flush t
 
   let set_partial (T ((module S), t)) key ~offset contents =
     let filename = Mirage_kv.Key.to_string key in
@@ -158,21 +155,19 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     | Some file ->
       let off = Optint.Int63.to_int offset in
       let len = String.length contents in
-      let* _ =
-        lift_error S.Disk.Id.to_int64 @@ S.blit_from_string t file ~off ~len contents
-      in
-      lift_error S.Disk.Id.to_int64 @@ S.flush t
+      let* _ = lift_error @@ S.blit_from_string t file ~off ~len contents in
+      lift_error @@ S.flush t
 
   let remove (T ((module S), t)) key =
     let filename = Mirage_kv.Key.to_string key in
-    let* () = lift_error S.Disk.Id.to_int64 @@ S.remove t filename in
-    lift_error S.Disk.Id.to_int64 @@ S.flush t
+    let* () = lift_error @@ S.remove t filename in
+    lift_error @@ S.flush t
 
   let rename (T ((module S), t)) ~source ~dest =
     let src = Mirage_kv.Key.to_string source in
     let dst = Mirage_kv.Key.to_string dest in
-    let* () = lift_error S.Disk.Id.to_int64 @@ S.rename t ~src ~dst in
-    lift_error S.Disk.Id.to_int64 @@ S.flush t
+    let* () = lift_error @@ S.rename t ~src ~dst in
+    lift_error @@ S.flush t
 
   let last_modified _ _ = Lwt_result.fail (`Unsupported_operation "last_modified")
   let digest _ _ = Lwt_result.fail (`Unsupported_operation "digest")

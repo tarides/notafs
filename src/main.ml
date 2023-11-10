@@ -190,54 +190,65 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
   let list t prefix = Files.list t.files prefix
 end
 
-module Make_check (Check : CHECKSUM) (B : DISK) = struct
+module Make_check (Check : CHECKSUM) (Block : DISK) = struct
   let debug = false
+
+  type error =
+    [ `Read of Block.error
+    | `Write of Block.write_error
+    | `Invalid_checksum of Int64.t
+    | `All_generations_corrupted
+    | `Disk_is_full
+    | `Disk_not_formatted
+    | `Wrong_page_size of int
+    | `Wrong_disk_size
+    ]
+
+  let pp_error h = function
+    | `Read e -> Block.pp_error h e
+    | `Write e -> Block.pp_write_error h e
+    | `Invalid_checksum id -> Format.fprintf h "Invalid_checksum %s" (Int64.to_string id)
+    | `All_generations_corrupted -> Format.fprintf h "All_generations_corrupted"
+    | `Disk_is_full -> Format.fprintf h "Disk_is_full"
+    | `Disk_not_formatted -> Format.fprintf h "Disk_not_formatted"
+    | `Wrong_page_size size -> Format.fprintf h "Wrong_page_size %i" size
+    | `Wrong_disk_size -> Format.fprintf h "Wrong_disk_size"
+
+  module type S =
+    S
+      with type Disk.read_error = Block.error
+       and type Disk.write_error = Block.write_error
 
   type t = T : (module S with type t = 'a) * 'a -> t
 
+  let make_disk block =
+    let open Lwt.Syntax in
+    let+ (module A_disk) = Context.of_impl (module Block) (module Check) block in
+    Ok (module Make_disk (A_disk) : S)
+
+  exception Fs of error
+
   open Lwt.Syntax
 
-  let catch fn =
-    Lwt.catch fn (fun e ->
-      Format.printf "ERROR: %s@." (Printexc.to_string e) ;
-      Printexc.print_backtrace stdout ;
-      Format.printf "@." ;
-      raise e)
-
-  let catch' fn =
-    try fn () with
-    | e ->
-      Format.printf "ERROR: %s@." (Printexc.to_string e) ;
-      Printexc.print_backtrace stdout ;
-      Format.printf "@." ;
-      raise e
-
-  let or_fail s lwt =
+  let or_fail _ lwt =
     Lwt.map
       (function
        | Ok r -> r
-       | Error _ -> failwith s)
+       | Error e -> raise (Fs e))
       lwt
 
   let format block =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.format@." ;
-    let* (module A_disk) = Context.of_impl (module B) (module Check) block in
-    let (module S) = (module Make_disk (A_disk) : S) in
     or_fail "Notafs.format"
     @@
     let open Lwt_result.Syntax in
+    let* (module S) = make_disk block in
     let+ (t : S.t) = S.format () in
     T ((module S), t)
 
   let stats (T ((module S), _)) = Stats.snapshot S.Disk.stats
 
   let of_block block =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.of_block@." ;
-    let* (module A_disk) = Context.of_impl (module B) (module Check) block in
+    let* (module A_disk) = Context.of_impl (module Block) (module Check) block in
     let (module S) = (module Make_disk (A_disk) : S) in
     or_fail "Notafs.of_block"
     @@
@@ -245,50 +256,23 @@ module Make_check (Check : CHECKSUM) (B : DISK) = struct
     let+ (t : S.t) = S.of_block () in
     T ((module S), t)
 
-  let flush (T ((module X), t)) =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.flush@." ;
-    or_fail "Notafs.flush" @@ X.flush t
-
-  let mem (T ((module X), t)) filename =
-    catch'
-    @@ fun () ->
-    if debug then Format.printf "Notafs.mem@." ;
-    X.mem t filename
+  let flush (T ((module X), t)) = or_fail "Notafs.flush" @@ X.flush t
+  let mem (T ((module X), t)) filename = X.mem t filename
 
   type file = File : (module S with type t = 'a and type file = 'b) * 'a * 'b -> file
 
   let find (T ((module X), t)) filename =
-    catch'
-    @@ fun () ->
-    if debug then Format.printf "Notafs.find %S@." filename ;
     match X.find_opt t filename with
     | None -> None
     | Some file -> Some (File ((module X), t, file))
 
-  let filename (File ((module X), _, file)) =
-    catch'
-    @@ fun () ->
-    if debug then Format.printf "Notafs.filename@." ;
-    X.filename file
-
-  let remove (T ((module X), t)) filename =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.remove@." ;
-    or_fail "Notafs.remove" @@ X.remove t filename
+  let filename (File ((module X), _, file)) = X.filename file
+  let remove (T ((module X), t)) filename = or_fail "Notafs.remove" @@ X.remove t filename
 
   let replace (T ((module X), t)) filename contents =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.replace@." ;
     or_fail "Notafs.replace" @@ X.replace t filename contents
 
   let touch (T ((module X), t)) filename contents =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.touch %S@." filename ;
     or_fail "Notafs.touch"
     @@
     let open Lwt_result.Syntax in
@@ -296,33 +280,19 @@ module Make_check (Check : CHECKSUM) (B : DISK) = struct
     File ((module X), t, file)
 
   let rename (T ((module X), t)) ~src ~dst =
-    catch
-    @@ fun () ->
     if debug then Format.printf "Notafs.rename@." ;
     or_fail "Notafs.rename" @@ X.rename t ~src ~dst
 
   let append_substring (File ((module X), _, file)) str ~off ~len =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.append_substring@." ;
     or_fail "Notafs.append_substring" @@ X.append_substring file str ~off ~len
 
   let blit_to_bytes (File ((module X), _, file)) ~off ~len bytes =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.blit_to_bytes@." ;
     or_fail "Notafs.blit_to_bytes" @@ X.blit_to_bytes file ~off ~len bytes
 
   let blit_from_string (File ((module X), t, file)) ~off ~len string =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.blit_from_string@." ;
     or_fail "Notafs.blit_from_string" @@ X.blit_from_string t file ~off ~len string
 
   let size (File ((module X), _, file)) =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.size@." ;
     or_fail "Notafs.size"
     @@
     let open Lwt_result.Syntax in

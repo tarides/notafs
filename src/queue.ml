@@ -210,11 +210,10 @@ module Make (B : Context.A_DISK) = struct
 
   let pop_front t nb =
     let* acc, res = do_pop_front t nb [] in
-    let+ t, nb_discarded = push_discarded t in
+    let* t, nb_discarded = push_discarded t in
     match res with
-    | Ok_pop -> t, acc, Int64.of_int (nb - nb_discarded)
-    | Underflow 0 -> failwith "Underflow 0: Disk is full"
-    | Underflow _ -> failwith "Disk is full"
+    | Ok_pop -> Lwt_result.return (t, acc, Int64.of_int (nb - nb_discarded))
+    | Underflow _ -> Lwt_result.fail `Disk_is_full
 
   type q =
     { free_start : Sector.id
