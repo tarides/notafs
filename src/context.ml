@@ -227,7 +227,7 @@ let of_impl
       end ;
       Lru.detach_remove elt lru
 
-    let max_lru_size = 128
+    let max_lru_size = 2048
     let min_lru_size = max_lru_size / 2
 
     let rec write_all = function

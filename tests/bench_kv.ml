@@ -90,20 +90,14 @@ module Test (Kv : Mirage_kv.RW) = struct
     let+ contents = no_error @@ Kv.get fs filename in
     let t1 = Unix.gettimeofday () in
     Format.printf "Read: %fs@." (t1 -. t0) ;
+    assert (String.length contents = String.length input_contents) ;
     assert (contents = input_contents) ;
     Block.stats ()
 
   let main fs =
     let* () = write fs in
-    let* () = write fs in
-    let* () = write fs in
-    let* () = write fs in
-    let* () = write fs in
-    let* () = write fs in
-    let* () = write fs in
-    let* () = write fs in
-    let* () = write fs in
     let* () = read fs in
+    let* () = write fs in
     let* () = read fs in
     let* () = write fs in
     let* () = read fs in
@@ -132,7 +126,7 @@ let main () =
   in
   let* () =
     let* fs = no_error @@ Notafs_kv.connect block in
-    Format.printf "@.--- Notafs without checksum:@." ;
+    Format.printf "@.--- Notafs without checksum with existing contents:@." ;
     let* () = Test_notafs.main fs in
     Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Notafs_kv.stats fs) ;
     Lwt.return ()

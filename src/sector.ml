@@ -43,6 +43,7 @@ module Make (B : Context.A_DISK) : sig
   val get_child_ptr : t -> int -> ptr r
   val set_child_ptr : t -> int -> ptr -> unit r
   val erase_region : t -> off:int -> len:int -> unit r
+  val detach_region : t -> off:int -> len:int -> unit r
   val blit_from_string : string -> int -> t -> int -> int -> unit r
   val blit_to_bytes : t -> int -> bytes -> int -> int -> unit r
 
@@ -231,17 +232,9 @@ end = struct
         assert (child.depth = t.depth + 1) ;
         ()
       | Detached ->
-        if H.length t.children = 0
-        then begin
-          assert (t.parent = Detached) ;
-          assert (t.depth = 0) ;
-          t.depth <- child.depth - 1
-        end
-        else begin
-          assert (H.length child.children = 0) ;
-          assert (child.depth = 0) ;
-          child.depth <- t.depth + 1
-        end
+        if H.length child.children = 0
+        then child.depth <- t.depth + 1
+        else decr_depth t (child.depth - 1)
       | _ -> failwith "set_child: would lose parent"
     end ;
     child.parent <- Parent (t, offset) ;
@@ -255,6 +248,16 @@ end = struct
         | self -> assert (self == child)
         | exception Not_found -> H.replace t.children offset child
       end
+    end
+
+  and decr_depth t depth =
+    if t.depth <= depth
+    then ()
+    else begin
+      t.depth <- depth ;
+      match t.parent with
+      | Parent (parent, _) -> decr_depth parent (depth - 1)
+      | Detached -> ()
     end
 
   let finalize_set_id t () =
@@ -342,6 +345,22 @@ end = struct
     B.unallocate t.cstruct ;
     t.id <- Freed ;
     drop_from_parent t
+
+  let detach_region t ~off ~len =
+    let* () = release t in
+    let+ cstruct = rw_cstruct t in
+    Cstruct.blit cstruct (off + len) cstruct off (Cstruct.length cstruct - off - len) ;
+    for i = Cstruct.length cstruct - len to Cstruct.length cstruct - 1 do
+      Cstruct.set_uint8 cstruct i 0
+    done ;
+    for i = off to off + len - 1 do
+      match H.find_opt t.children i with
+      | None -> ()
+      | Some child ->
+        assert (child.id <> Freed) ;
+        child.parent <- Detached ;
+        H.remove t.children i
+    done
 
   let erase_region t ~off ~len =
     let* () = release t in
