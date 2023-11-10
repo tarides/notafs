@@ -93,6 +93,24 @@ module I32 : S = struct
   let to_int64 = Optint.to_int64
 end
 
+module I63 : S = struct
+  module Int63 = Optint.Int63
+
+  type t = Int63.t [@@deriving repr]
+
+  let byte_size = 8
+  let read cstruct offset = Int63.of_int64 @@ Cstruct.HE.get_uint64 cstruct offset
+  let write cstruct offset v = Cstruct.HE.set_uint64 cstruct offset (Int63.to_int64 v)
+  let to_string = Int63.to_string
+  let of_int i = Int63.of_int i
+  let of_int64 i = Int63.of_int64 i
+  let add t x = Int63.add t (of_int x)
+  let succ = Int63.succ
+  let equal = Int63.equal
+  let compare = Int63.compare
+  let to_int64 x = Int63.to_int64 x
+end
+
 module I64 : S = struct
   type t = Int64.t [@@deriving repr]
 
@@ -117,4 +135,6 @@ let of_nb_pages nb =
   | bits when bits <= 8 -> (module I8 : S)
   | bits when bits <= 16 -> (module I16 : S)
   | bits when bits <= 32 -> (module I32 : S)
-  | _ -> (module I64 : S)
+  | bits when bits <= 63 -> (module I63 : S)
+  | 64 -> (module I64 : S)
+  | bits -> Printf.ksprintf invalid_arg "Disk too large: %i bits" bits
