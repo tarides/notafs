@@ -1,20 +1,17 @@
-(* open! Import *)
-
 module Int63 = Optint.Int63
 
 module type S = Irmin_pack_io.Io_s
 
 module Make (Clock : Mirage_clock.MCLOCK) (B : Notafs.DISK) = struct
-  module Io_index = Index_notafs.Make (Clock) (B)
-  module Index_platform = Io_index.Notafs_platform
-  module Fs = Io_index.Fs
+  module Index_platform = Index_notafs.Make (Clock) (B)
+  module Fs = Index_platform.Fs
 
   let init b = Index_platform.IO.init b
-  let fs () = Io_index.Notafs_platform.IO.fs ()
+  let fs () = Index_platform.IO.fs ()
   let notafs_flush () = Lwt_direct.direct (fun () -> Fs.flush (fs ()))
 
-  type t = Io_index.Notafs_platform.IO.t
-  type misc_error = string [@@deriving irmin]
+  type t = Index_platform.IO.t
+  type misc_error = unit [@@deriving irmin]
 
   type create_error =
     [ `Io_misc of misc_error
@@ -129,7 +126,7 @@ module Make (Clock : Mirage_clock.MCLOCK) (B : Notafs.DISK) = struct
 
   let size_of_path path =
     match Fs.find (fs ()) path with
-    | None -> Error (`No_such_file_or_directory ("size_of_path: " ^ path))
+    | None -> Error (`No_such_file_or_directory path)
     | Some file -> read_size file
 
   let classify_path path =
