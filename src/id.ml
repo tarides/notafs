@@ -69,19 +69,28 @@ module I16 : S = struct
 end
 
 module I32 : S = struct
-  type t = Int32.t [@@deriving repr]
+  type t = Optint.t
+
+  let t =
+    Repr.map
+      (Repr.string_of (`Fixed 4))
+      (fun s -> Optint.decode s ~off:0)
+      (fun i ->
+        let bytes = Bytes.create 4 in
+        Optint.encode bytes ~off:0 i ;
+        Bytes.unsafe_to_string bytes)
 
   let byte_size = 4
-  let read cstruct offset = Cstruct.HE.get_uint32 cstruct offset
-  let write cstruct offset v = Cstruct.HE.set_uint32 cstruct offset v
-  let to_string = Int32.to_string
-  let of_int i = Int32.of_int i
-  let of_int64 = Int64.to_int32
-  let add t x = Int32.add t (of_int x)
-  let succ = Int32.succ
-  let equal = Int32.equal
-  let compare = Int32.compare
-  let to_int64 = Int64.of_int32
+  let read cstruct offset = Optint.of_int32 @@ Cstruct.HE.get_uint32 cstruct offset
+  let write cstruct offset v = Cstruct.HE.set_uint32 cstruct offset (Optint.to_int32 v)
+  let to_string = Optint.to_string
+  let of_int i = Optint.of_int i
+  let of_int64 = Optint.of_int64
+  let add t x = Optint.add t (of_int x)
+  let succ = Optint.succ
+  let equal = Optint.equal
+  let compare = Optint.compare
+  let to_int64 = Optint.to_int64
 end
 
 module I64 : S = struct

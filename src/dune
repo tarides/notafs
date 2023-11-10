@@ -1,6 +1,6 @@
 (library
  (public_name notafs)
  (name notafs)
- (libraries lwt mirage-block repr checkseum.c mirage-kv)
+ (libraries lwt mirage-block optint repr checkseum.c mirage-kv)
  (preprocess
   (pps ppx_repr)))

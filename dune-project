@@ -17,6 +17,7 @@
     checkseum
     mirage-block
     (mirage-kv (>= "6.1.1"))
+    optint
     repr
     ppx_repr
     (mirage-block-unix :with-test)
