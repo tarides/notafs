@@ -201,7 +201,8 @@ module Make_check (Check : CHECKSUM) (Block : DISK) = struct
     | `Disk_is_full
     | `Disk_not_formatted
     | `Wrong_page_size of int
-    | `Wrong_disk_size
+    | `Wrong_disk_size of Int64.t
+    | `Wrong_checksum_algorithm of string * int
     ]
 
   let pp_error h = function
@@ -212,7 +213,10 @@ module Make_check (Check : CHECKSUM) (Block : DISK) = struct
     | `Disk_is_full -> Format.fprintf h "Disk_is_full"
     | `Disk_not_formatted -> Format.fprintf h "Disk_not_formatted"
     | `Wrong_page_size size -> Format.fprintf h "Wrong_page_size %i" size
-    | `Wrong_disk_size -> Format.fprintf h "Wrong_disk_size"
+    | `Wrong_disk_size size ->
+      Format.fprintf h "Wrong_disk_size %s" (Int64.to_string size)
+    | `Wrong_checksum_algorithm (name, byte_size) ->
+      Format.fprintf h "Wrong_checksum_algorithm (%S, %i)" name byte_size
 
   module type S =
     S
@@ -304,6 +308,7 @@ end
 module No_checksum = struct
   type t = unit
 
+  let name = "NO-CHECK"
   let equal = ( = )
   let default = ()
   let digest_bigstring _ _ _ _ = ()
@@ -317,7 +322,8 @@ end
 module Adler32 = struct
   include Checkseum.Adler32
 
-  let byte_size = 8
+  let name = "ADLER-32"
+  let byte_size = 4
   let read cstruct offset = of_int32 @@ Cstruct.HE.get_uint32 cstruct offset
   let write cstruct offset v = Cstruct.HE.set_uint32 cstruct offset (to_int32 v)
 end

@@ -26,10 +26,13 @@ end
 module type CHECKSUM = sig
   type t
 
+  val name : string
+  (** A short [name] (max 8 characters) to identify the checksum algorithm. *)
+
   val equal : t -> t -> bool
   val default : t
-  val to_int32 : t -> Int32.t
   val of_int32 : Int32.t -> t
+  val to_int32 : t -> Int32.t
   val digest_bigstring : Checkseum.bigstring -> int -> int -> t -> t
 
   include Id.FIELD with type t := t
@@ -53,7 +56,8 @@ module type A_DISK = sig
     | `Disk_not_formatted
     | `Disk_is_full
     | `Wrong_page_size of int
-    | `Wrong_disk_size
+    | `Wrong_disk_size of Int64.t
+    | `Wrong_checksum_algorithm of string * int
     ]
 
   val page_size : int
@@ -115,7 +119,8 @@ let of_impl
       | `Disk_is_full
       | `Disk_not_formatted
       | `Wrong_page_size of int
-      | `Wrong_disk_size
+      | `Wrong_disk_size of Int64.t
+      | `Wrong_checksum_algorithm of string * int
       ]
 
     type sector =

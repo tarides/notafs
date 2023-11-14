@@ -11,7 +11,8 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     | `All_generations_corrupted
     | `Disk_not_formatted
     | `Wrong_page_size of int
-    | `Wrong_disk_size
+    | `Wrong_disk_size of Int64.t
+    | `Wrong_checksum_algorithm of string * int
     | `Unsupported_operation of string
     ]
 
@@ -26,7 +27,9 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     | `All_generations_corrupted -> Format.fprintf h "All_generations_corrupted"
     | `Disk_not_formatted -> Format.fprintf h "Disk_not_formatted"
     | `Wrong_page_size s -> Format.fprintf h "Wrong_page_size %d" s
-    | `Wrong_disk_size -> Format.fprintf h "Wrong_disk_size"
+    | `Wrong_disk_size s -> Format.fprintf h "Wrong_disk_size %s" (Int64.to_string s)
+    | `Wrong_checksum_algorithm (name, byte_size) ->
+      Format.fprintf h "Wrong_checksum_algorithm (%S, %i)" name byte_size
     | `Unsupported_operation msg -> Format.fprintf h "Unsupported_operation %S" msg
 
   let pp_write_error = pp_error
@@ -43,7 +46,9 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     | Error (`Read e) -> Error (`Read e)
     | Error (`Write e) -> Error (`Write e)
     | Error (`Wrong_page_size s) -> Error (`Wrong_page_size s)
-    | Error `Wrong_disk_size -> Error `Wrong_disk_size
+    | Error (`Wrong_disk_size s) -> Error (`Wrong_disk_size s)
+    | Error (`Wrong_checksum_algorithm (name, byte_size)) ->
+      Error (`Wrong_checksum_algorithm (name, byte_size))
 
   module type S =
     Main.S
