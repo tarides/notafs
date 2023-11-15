@@ -29,7 +29,6 @@ let string_of_disk_space space =
 
 let info_cmd block =
   let infos () =
-    let open Lwt.Syntax in
     let+ config = Notafs.metadatas (module Block) block in
     let disk_size = Int64.mul config.disk_size (Int64.of_int config.page_size) in
     Fmt.pr "Disk space: %s@." (string_of_disk_space disk_size) ;
@@ -39,7 +38,7 @@ let info_cmd block =
       config.checksum_algorithm
       (8 * config.checksum_byte_size)
   in
-  Lwt_main.run (infos ())
+  on_error "info" @@ Lwt_main.run (infos ())
 
 let touch disk path =
   let touch () =

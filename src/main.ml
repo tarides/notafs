@@ -338,5 +338,6 @@ let metadatas (type a) (module Block : DISK with type t = a) (block : a) =
   in
   let+ result = H.load_config () in
   match result with
-  | Ok config -> config
+  | Ok config -> Ok config
+  | Error `Disk_not_formatted -> Error `Disk_not_formatted
   | Error _ -> failwith "error"

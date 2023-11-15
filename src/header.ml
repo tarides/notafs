@@ -1,6 +1,5 @@
 type config =
-  { magic : string
-  ; disk_size : Int64.t
+  { disk_size : Int64.t
   ; page_size : int
   ; checksum_algorithm : string
   ; checksum_byte_size : int
@@ -105,14 +104,18 @@ end = struct
   let load_config () =
     let open Schema.Infix in
     let* s = Sector.load_root ~check:false (B.Id.of_int 0) in
-    let* magic = get_magic s in
+    let* magic' = get_magic s in
+    let* () =
+      if magic' <> magic
+      then Lwt_result.fail `Disk_not_formatted
+      else Lwt_result.return ()
+    in
     let* disk_size = get_disk_size s in
     let* page_size = get_page_size s in
     let* checksum_byte_size = s.@(checksum_byte_size) in
     let+ checksum_algorithm = s.@(checksum_algorithm) in
     let config =
-      { magic = string_of_int64 magic
-      ; disk_size
+      { disk_size
       ; page_size
       ; checksum_byte_size
       ; checksum_algorithm = string_of_int64 checksum_algorithm
@@ -122,11 +125,6 @@ end = struct
 
   let load () =
     let* config, s = load_config () in
-    let* () =
-      if int64_of_string config.magic <> magic
-      then Lwt_result.fail `Disk_not_formatted
-      else Lwt_result.return ()
-    in
     let* () =
       if config.page_size <> B.page_size
       then Lwt_result.fail (`Wrong_page_size config.page_size)

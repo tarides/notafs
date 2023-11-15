@@ -26,7 +26,7 @@ let connect_disk disk_path =
 
 (* Disk *)
 
-let disk_path_flag =
+let disk_path =
   Arg.(
     required
     & opt (some file) None
@@ -35,7 +35,7 @@ let disk_path_flag =
 let disk_path_pos =
   Arg.(required & pos 0 (some file) None & info [] ~doc:"path to a disk")
 
-let disk = Term.(const connect_disk $ disk_path_flag)
+let disk = Term.(const connect_disk $ disk_path)
 let block = Term.(const connect_block $ disk_path_pos)
 
 let file_path =
