@@ -101,7 +101,7 @@ Lastly those functions will help you have a better understanding of the content 
 
 ```shell
 # Dump general informations on the disk into the standard output:
-notafs/ $ notafs-cli info -d/tmp/storage
+notafs/ $ notafs-cli info /tmp/storage
 
 # Dump a file `foo` from the disk into the standard output:
 notafs/ $ notafs-cli cat -d/tmp/storage foo
