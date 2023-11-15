@@ -1,9 +1,25 @@
+type config =
+  { magic : string
+  ; disk_size : Int64.t
+  ; page_size : int
+  ; checksum_algorithm : string
+  ; checksum_byte_size : int
+  }
+
+module type CONFIG = sig
+  type error
+  type 'a io := ('a, error) Lwt_result.t
+
+  val load_config : unit -> config io
+end
+
 module Make (B : Context.A_DISK) : sig
   module Schema : module type of Schema.Make (B)
   module Sector = Schema.Sector
 
+  type error = B.error
   type t = Sector.t
-  type 'a io := ('a, B.error) Lwt_result.t
+  type 'a io := ('a, error) Lwt_result.t
 
   val magic : int64
   val get_magic : t -> int64 io
@@ -12,11 +28,13 @@ module Make (B : Context.A_DISK) : sig
   val get_roots : t -> int io
   val create : disk_size:int64 -> page_size:int -> Sector.t io
   val load : unit -> Sector.t io
+  val load_config : unit -> config io
 end = struct
   module Schema = Schema.Make (B)
   module Sector = Schema.Sector
   open Lwt_result.Syntax
 
+  type error = B.error
   type t = Sector.t
 
   type schema =
@@ -24,11 +42,11 @@ end = struct
     ; disk_size : int64 Schema.field
     ; page_size : int Schema.field
     ; roots : int Schema.field
-    ; checksum_bits : int Schema.field
+    ; checksum_byte_size : int Schema.field
     ; checksum_algorithm : int64 Schema.field
     }
 
-  let { magic; disk_size; page_size; roots; checksum_bits; checksum_algorithm } =
+  let { magic; disk_size; page_size; roots; checksum_byte_size; checksum_algorithm } =
     Schema.define
     @@
     let open Schema.Syntax in
@@ -36,9 +54,9 @@ end = struct
     and+ disk_size = Schema.uint64
     and+ page_size = Schema.uint32
     and+ roots = Schema.uint32
-    and+ checksum_bits = Schema.uint16
+    and+ checksum_byte_size = Schema.uint8
     and+ checksum_algorithm = Schema.uint64 in
-    { magic; disk_size; page_size; roots; checksum_bits; checksum_algorithm }
+    { magic; disk_size; page_size; roots; checksum_byte_size; checksum_algorithm }
 
   include struct
     open Schema.Infix
@@ -80,46 +98,58 @@ end = struct
     let* () = set_disk_size s disk_size in
     let* () = set_page_size s page_size in
     let* () = set_roots s 4 in
-    let* () = s.@(checksum_bits) <- B.C.byte_size in
+    let* () = s.@(checksum_byte_size) <- B.C.byte_size in
     let+ () = s.@(checksum_algorithm) <- int64_of_string B.C.name in
     s
 
-  let load () =
+  let load_config () =
     let open Schema.Infix in
     let* s = Sector.load_root ~check:false (B.Id.of_int 0) in
-    (* check magic number *)
-    let* magic' = get_magic s in
+    let* magic = get_magic s in
+    let* disk_size = get_disk_size s in
+    let* page_size = get_page_size s in
+    let* checksum_byte_size = s.@(checksum_byte_size) in
+    let+ checksum_algorithm = s.@(checksum_algorithm) in
+    let config =
+      { magic = string_of_int64 magic
+      ; disk_size
+      ; page_size
+      ; checksum_byte_size
+      ; checksum_algorithm = string_of_int64 checksum_algorithm
+      }
+    in
+    config, s
+
+  let load () =
+    let* config, s = load_config () in
     let* () =
-      if magic' <> magic
+      if int64_of_string config.magic <> magic
       then Lwt_result.fail `Disk_not_formatted
       else Lwt_result.return ()
     in
-    (* check page size *)
-    let* page_size' = get_page_size s in
     let* () =
-      if page_size' <> B.page_size
-      then Lwt_result.fail (`Wrong_page_size page_size')
+      if config.page_size <> B.page_size
+      then Lwt_result.fail (`Wrong_page_size config.page_size)
       else Lwt_result.return ()
     in
-    (* check disk size *)
-    let* disk_size' = get_disk_size s in
     let* () =
-      if disk_size' <> B.nb_sectors
-      then Lwt_result.fail (`Wrong_disk_size disk_size')
+      if config.disk_size <> B.nb_sectors
+      then Lwt_result.fail (`Wrong_disk_size config.disk_size)
       else Lwt_result.return ()
     in
-    (* check checksum *)
-    let* checksum_bits' = s.@(checksum_bits) in
-    let* checksum_algorithm' = s.@(checksum_algorithm) in
     let* () =
-      if checksum_bits' <> B.C.byte_size
-         || checksum_algorithm' <> int64_of_string B.C.name
+      if config.checksum_byte_size <> B.C.byte_size
+         || config.checksum_algorithm <> B.C.name
       then
         Lwt_result.fail
           (`Wrong_checksum_algorithm
-            (string_of_int64 checksum_algorithm', checksum_bits'))
+            (config.checksum_algorithm, config.checksum_byte_size))
       else Lwt_result.return ()
     in
     let+ () = Sector.verify_checksum s in
     s
+
+  let load_config () =
+    let+ config, _ = load_config () in
+    config
 end

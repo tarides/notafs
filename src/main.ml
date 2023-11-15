@@ -329,3 +329,14 @@ module Adler32 = struct
 end
 
 module Make (B : DISK) = Make_check (Adler32) (B)
+
+let metadatas (type a) (module Block : DISK with type t = a) (block : a) =
+  let open Lwt.Syntax in
+  let* (module A_disk) = Context.of_impl (module Block) (module No_checksum) block in
+  let (module H) =
+    (module Header.Make (A_disk) : Header.CONFIG with type error = A_disk.error)
+  in
+  let+ result = H.load_config () in
+  match result with
+  | Ok config -> config
+  | Error _ -> failwith "error"
