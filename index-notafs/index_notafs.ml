@@ -20,7 +20,7 @@ module Make (Clock : Mirage_clock.MCLOCK) (B : Notafs.DISK) = struct
         | Some fs -> fs
         | None -> failwith "expected fs?"
 
-      let exists filename = Fs.mem (fs ()) filename
+      let exists filename = Fs.exists (fs ()) filename = Some `Value
 
       module Header_raw = struct
         let max_fan_index = 0

@@ -23,6 +23,7 @@ let main_cmd =
       ; copy_cmd
       ; stats_cmd
       ; list_cmd
+      ; tree_cmd
       ]
   in
   commands

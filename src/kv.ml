@@ -72,13 +72,13 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
   type key = Mirage_kv.Key.t
 
   let exists (T ((module S), t)) key =
-    let filename = Mirage_kv.Key.to_string key in
+    let filename = Mirage_kv.Key.segments key in
     match S.find_opt t filename with
     | None -> Lwt.return_ok None
     | Some _ -> Lwt.return_ok (Some `Value)
 
   let get (T ((module S), t)) key =
-    let filename = Mirage_kv.Key.to_string key in
+    let filename = Mirage_kv.Key.segments key in
     match S.find_opt t filename with
     | None -> Lwt_result.fail (`Not_found key)
     | Some file ->
@@ -91,7 +91,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
       Bytes.unsafe_to_string bytes
 
   let get_partial (T ((module S), t)) key ~offset ~length =
-    let filename = Mirage_kv.Key.to_string key in
+    let filename = Mirage_kv.Key.segments key in
     match S.find_opt t filename with
     | None -> Lwt_result.fail (`Not_found key)
     | Some file ->
@@ -107,7 +107,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
       Bytes.unsafe_to_string bytes
 
   let list (T ((module S), t)) key =
-    let filename = Mirage_kv.Key.to_string key in
+    let filename = Mirage_kv.Key.segments key in
     let lst = S.list t filename in
     let lst =
       List.map
@@ -120,7 +120,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     Lwt.return_ok lst
 
   let size (T ((module S), t)) key =
-    let filename = Mirage_kv.Key.to_string key in
+    let filename = Mirage_kv.Key.segments key in
     match S.find_opt t filename with
     | None -> Lwt_result.fail (`Not_found key)
     | Some file ->
@@ -128,7 +128,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
       Optint.Int63.of_int size
 
   let allocate (T ((module S), t)) key ?last_modified:_ size =
-    let filename = Mirage_kv.Key.to_string key in
+    let filename = Mirage_kv.Key.segments key in
     match S.find_opt t filename with
     | Some _ -> Lwt_result.fail (`Already_present key)
     | None ->
@@ -138,7 +138,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
       ()
 
   let set (T ((module S), t)) key contents =
-    let filename = Mirage_kv.Key.to_string key in
+    let filename = Mirage_kv.Key.segments key in
     let* () =
       match S.find_opt t filename with
       | None -> Lwt_result.return ()
@@ -148,7 +148,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     lift_error S.Disk.Id.to_int64 @@ S.flush t
 
   let set_partial (T ((module S), t)) key ~offset contents =
-    let filename = Mirage_kv.Key.to_string key in
+    let filename = Mirage_kv.Key.segments key in
     match S.find_opt t filename with
     | None -> Lwt_result.fail (`Not_found key)
     | Some file ->
@@ -160,13 +160,13 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
       lift_error S.Disk.Id.to_int64 @@ S.flush t
 
   let remove (T ((module S), t)) key =
-    let filename = Mirage_kv.Key.to_string key in
+    let filename = Mirage_kv.Key.segments key in
     let* () = lift_error S.Disk.Id.to_int64 @@ S.remove t filename in
     lift_error S.Disk.Id.to_int64 @@ S.flush t
 
   let rename (T ((module S), t)) ~source ~dest =
-    let src = Mirage_kv.Key.to_string source in
-    let dst = Mirage_kv.Key.to_string dest in
+    let src = Mirage_kv.Key.segments source in
+    let dst = Mirage_kv.Key.segments dest in
     let* () = lift_error S.Disk.Id.to_int64 @@ S.rename t ~src ~dst in
     lift_error S.Disk.Id.to_int64 @@ S.flush t
 

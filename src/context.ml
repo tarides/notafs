@@ -37,6 +37,7 @@ module type A_DISK = sig
     | `Wrong_disk_size
     ]
 
+  val pp_error : Format.formatter -> error -> unit
   val page_size : int
   val header_size : int
   val nb_sectors : int64
@@ -94,6 +95,17 @@ let of_impl (type t) (module B : DISK with type t = t) (module C : CHECKSUM) (di
       | `Wrong_page_size of int
       | `Wrong_disk_size
       ]
+
+    let pp_error h = function
+      | `Read e -> B.pp_error h e
+      | `Write e -> B.pp_write_error h e
+      | `Invalid_checksum id -> Format.fprintf h "Invalid_checksum %s" (Id.to_string id)
+      | `All_generations_corrupted -> Format.fprintf h "All_generations_corrupted"
+      | `Disk_not_formatted -> Format.fprintf h "Disk_not_formatted"
+      | `Wrong_page_size s -> Format.fprintf h "Wrong_page_size %d" s
+      | `Wrong_disk_size -> Format.fprintf h "Wrong_disk_size"
+      | `Unsupported_operation msg -> Format.fprintf h "Unsupported_operation %S" msg
+      | `Disk_failed -> Format.fprintf h "Disk_failed"
 
     type sector =
       { mutable cstruct : page

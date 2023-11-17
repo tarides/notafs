@@ -27,3 +27,9 @@
  (modules test_large_notafs)
  (package notafs)
  (libraries lwt notafs mirage-block-unix mtime.clock.os))
+
+(test
+ (name test_fs)
+ (modules test_fs)
+ (package notafs)
+ (libraries lwt notafs mirage-block-unix mtime.clock.os cmdliner))

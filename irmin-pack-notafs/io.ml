@@ -59,7 +59,9 @@ module Make (Clock : Mirage_clock.MCLOCK) (B : Notafs.DISK) = struct
     let t = fs () in
     if overwrite
     then
-      let* () = if Fs.mem t path then Fs.remove t path else Lwt.return_unit in
+      let* () =
+        if Fs.exists t path = Some `Value then Fs.remove t path else Lwt.return_unit
+      in
       let+ r = Fs.touch t path "" in
       Ok r
     else (
@@ -133,11 +135,10 @@ module Make (Clock : Mirage_clock.MCLOCK) (B : Notafs.DISK) = struct
     | Some file -> read_size file
 
   let classify_path path =
-    if path = "/"
-    then `Directory
-    else if Fs.mem (fs ()) path
-    then `File
-    else `No_such_file_or_directory
+    match Fs.exists (fs ()) path with
+    | Some `Value -> `File
+    | Some `Dictionary -> `Directory
+    | None -> `No_such_file_or_directory
 
   let readonly _t = false
   let path t = Fs.filename t

@@ -161,6 +161,39 @@ let list disk path =
   in
   on_error "list" @@ Lwt_main.run (list ())
 
+let tree disk path =
+  let styled t pp =
+    match t with
+    | `Value -> pp
+    | `Dictionary -> Fmt.styled `Bold (Fmt.styled (`Fg `Blue) pp)
+  in
+  let rec tree (i, indent_tl) key =
+    let open Lwt_result.Syntax in
+    let* files = Disk.list disk key in
+    let n = List.length files in
+    let dump j (key, t) () =
+      let basename = Mirage_kv.Key.basename key in
+      let indent_hd = if j <> n - 1 then "├── " else "└── " in
+      Fmt.pr "%s%s%a@." indent_tl indent_hd (styled t Fmt.string) basename ;
+      let indent_tl = indent_tl ^ if j <> n - 1 then "│   " else "    " in
+      tree (i + 1, indent_tl) key
+    in
+    List.fold_left Lwt_result.bind (Lwt_result.return ()) @@ List.mapi dump files
+  in
+  let tree () =
+    let key = Mirage_kv.Key.v path in
+    Fmt.pr "path: %S@." path ;
+    let* t = Disk.exists disk key in
+    match t with
+    | Some `Dictionary ->
+      Fmt.pr "%a@." (styled `Dictionary Mirage_kv.Key.pp) key ;
+      tree (0, "") key
+    | Some `Value | None ->
+      Fmt.pr "%a [error opening dir]@." (styled `Value Mirage_kv.Key.pp) key ;
+      Lwt_result.return ()
+  in
+  on_error "tree" @@ Lwt_main.run (tree ())
+
 open Cmdliner
 (** Commands *)
 
@@ -249,3 +282,15 @@ let list_cmd =
   let doc = "lists the files available on a disk" in
   let info = Cmd.info "list" ~doc in
   Cmd.v info Term.(const list $ disk $ path)
+
+(* Tree *)
+let path =
+  Arg.(
+    value
+    & pos ~rev:true 0 string "/"
+    & info [] ~docv:"PATH" ~doc:"path to list recursively")
+
+let tree_cmd =
+  let doc = "lists recursively the files available on a disk" in
+  let info = Cmd.info "tree" ~doc in
+  Cmd.v info Term.(const tree $ disk $ path)
