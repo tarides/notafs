@@ -68,11 +68,13 @@ end
 
 open Lwt.Syntax
 
-let no_error lwt =
+let no_error pp lwt =
   Lwt.map
     (function
      | Ok v -> v
-     | Error _ -> failwith "unexpected error")
+     | Error e ->
+       Format.printf "ERROR: %a@." pp e ;
+       failwith "unexpected error")
     lwt
 
 module Test (Kv : Mirage_kv.RW) = struct
@@ -80,30 +82,24 @@ module Test (Kv : Mirage_kv.RW) = struct
 
   let write fs =
     let t0 = Unix.gettimeofday () in
-    let+ () = no_error @@ Kv.set fs filename input_contents in
+    let+ () = no_error Kv.pp_write_error @@ Kv.set fs filename input_contents in
     let t1 = Unix.gettimeofday () in
     Format.printf "Write: %fs@." (t1 -. t0) ;
     Block.stats ()
 
   let read fs =
     let t0 = Unix.gettimeofday () in
-    let+ contents = no_error @@ Kv.get fs filename in
+    let+ contents = no_error Kv.pp_error @@ Kv.get fs filename in
     let t1 = Unix.gettimeofday () in
     Format.printf "Read: %fs@." (t1 -. t0) ;
+    assert (String.length contents = String.length input_contents) ;
     assert (contents = input_contents) ;
     Block.stats ()
 
   let main fs =
     let* () = write fs in
-    let* () = write fs in
-    let* () = write fs in
-    let* () = write fs in
-    let* () = write fs in
-    let* () = write fs in
-    let* () = write fs in
-    let* () = write fs in
-    let* () = write fs in
     let* () = read fs in
+    let* () = write fs in
     let* () = read fs in
     let* () = write fs in
     let* () = read fs in
@@ -119,26 +115,27 @@ module Test_tar = Test (Tar_kv)
 
 let reset block =
   let zero = Cstruct.create sector_size in
-  no_error @@ Block.write block Int64.zero (List.init 16 (fun _ -> zero))
+  no_error Block.pp_write_error
+  @@ Block.write block Int64.zero (List.init 16 (fun _ -> zero))
 
 let main () =
   let* block = Block.connect ~prefered_sector_size:(Some sector_size) disk in
   let* () =
-    let* fs = no_error @@ Notafs_kv.format block in
+    let* fs = no_error Notafs_kv.pp_error @@ Notafs_kv.format block in
     Format.printf "@.--- Notafs without checksum:@." ;
     let* () = Test_notafs.main fs in
     Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Notafs_kv.stats fs) ;
     Lwt.return ()
   in
   let* () =
-    let* fs = no_error @@ Notafs_kv.connect block in
-    Format.printf "@.--- Notafs without checksum:@." ;
+    let* fs = no_error Notafs_kv.pp_error @@ Notafs_kv.connect block in
+    Format.printf "@.--- Notafs without checksum with existing contents:@." ;
     let* () = Test_notafs.main fs in
     Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Notafs_kv.stats fs) ;
     Lwt.return ()
   in
   let* () =
-    let* fs = no_error @@ Notafs_kv_crc.format block in
+    let* fs = no_error Notafs_kv_crc.pp_error @@ Notafs_kv_crc.format block in
     Format.printf "@.--- Notafs with checksum:@." ;
     let* () = Test_notafs_crc.main fs in
     Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Notafs_kv_crc.stats fs) ;

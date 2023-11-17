@@ -94,9 +94,6 @@ module Make (B : Context.A_DISK) = struct
   let to_payload t allocated =
     let* files, to_flush, allocated = flush_ropes t.files allocated in
     let str = string_of_raw files in
-    Fmt.pr "to_payload: %d / %S@." (String.length str) str ;
-    Fmt.pr "to_payload: %d@." (List.length to_flush) ;
-    Fmt.pr "to_payload: %d@." (List.length allocated) ;
     let* on_disk_size = Rope.size t.on_disk in
     assert (String.length str = on_disk_size) ;
     let* rope = Rope.blit_from_string t.on_disk 0 str 0 (String.length str) in
@@ -121,7 +118,6 @@ module Make (B : Context.A_DISK) = struct
 
   let of_disk_repr on_disk =
     let* str = Rope.to_string on_disk in
-    Fmt.pr "of_disk_repr: %S@." str ;
     let raw = raw_of_string str in
     match raw with
     | Ok (Raw_dir raw) ->

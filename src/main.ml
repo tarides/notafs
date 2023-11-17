@@ -35,7 +35,7 @@ module type S = sig
   val list : t -> key -> (string * [ `Value | `Dictionary ]) list
 end
 
-module Make_disk (B : Context.A_DISK) : S = struct
+module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
   module Disk = B
   module Sector = Sector.Make (B)
   module Root = Root.Make (B)
@@ -197,59 +197,81 @@ module Make_disk (B : Context.A_DISK) : S = struct
   let list t prefix = Files.list t.files prefix
 end
 
-module Make_check (Check : CHECKSUM) (B : DISK) = struct
+module Make_check (Check : CHECKSUM) (Block : DISK) = struct
   let debug = false
+
+  type error =
+    [ `Read of Block.error
+    | `Write of Block.write_error
+    | `Invalid_checksum of Int64.t
+    | `All_generations_corrupted
+    | `Disk_is_full
+    | `Disk_not_formatted
+    | `Wrong_page_size of int
+    | `Wrong_disk_size of Int64.t
+    | `Wrong_checksum_algorithm of string * int
+    ]
+
+  let pp_error h = function
+    | `Read e -> Block.pp_error h e
+    | `Write e -> Block.pp_write_error h e
+    | `Invalid_checksum id -> Format.fprintf h "Invalid_checksum %s" (Int64.to_string id)
+    | `All_generations_corrupted -> Format.fprintf h "All_generations_corrupted"
+    | `Disk_is_full -> Format.fprintf h "Disk_is_full"
+    | `Disk_not_formatted -> Format.fprintf h "Disk_not_formatted"
+    | `Wrong_page_size size -> Format.fprintf h "Wrong_page_size %i" size
+    | `Wrong_disk_size size ->
+      Format.fprintf h "Wrong_disk_size %s" (Int64.to_string size)
+    | `Wrong_checksum_algorithm (name, byte_size) ->
+      Format.fprintf h "Wrong_checksum_algorithm (%S, %i)" name byte_size
+
+  module type S =
+    S
+      with type Disk.read_error = Block.error
+       and type Disk.write_error = Block.write_error
 
   type t = T : (module S with type t = 'a) * 'a -> t
 
+  let make_disk block =
+    let open Lwt.Syntax in
+    let+ (module A_disk) = Context.of_impl (module Block) (module Check) block in
+    Ok (module Make_disk (A_disk) : S)
+
+  exception Fs of error
+
   open Lwt.Syntax
-
-  let catch fn =
-    Lwt.catch fn (fun e ->
-      Format.printf "ERROR: %s@." (Printexc.to_string e) ;
-      Printexc.print_backtrace stdout ;
-      Format.printf "@." ;
-      raise e)
-
-  let catch' fn =
-    try fn () with
-    | e ->
-      Format.printf "ERROR: %s@." (Printexc.to_string e) ;
-      Printexc.print_backtrace stdout ;
-      Format.printf "@." ;
-      raise e
 
   let or_fail pp s lwt =
     Lwt.map
       (function
        | Ok r -> r
        | Error err ->
-         Format.printf "ERROR: %a@." pp err ;
-         failwith s)
+         Format.printf "ERROR in %s: %a@." s pp err ;
+         raise (Fs err))
       lwt
 
   let split_filename filename =
     List.filter (fun s -> s <> "") @@ String.split_on_char '/' filename
 
   let format block =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.format@." ;
-    let* (module A_disk) = Context.of_impl (module B) (module Check) block in
-    let (module S) = (module Make_disk (A_disk) : S) in
-    or_fail S.pp_error "Notafs.format"
+    let or_fail _ lwt =
+      Lwt.map
+        (function
+         | Ok r -> r
+         | Error err -> raise (Fs err))
+        lwt
+    in
+    or_fail "Notafs.format"
     @@
     let open Lwt_result.Syntax in
+    let* (module S) = make_disk block in
     let+ (t : S.t) = S.format () in
     T ((module S), t)
 
   let stats (T ((module S), _)) = Stats.snapshot S.Disk.stats
 
   let of_block block =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.of_block@." ;
-    let* (module A_disk) = Context.of_impl (module B) (module Check) block in
+    let* (module A_disk) = Context.of_impl (module Block) (module Check) block in
     let (module S) = (module Make_disk (A_disk) : S) in
     or_fail S.pp_error "Notafs.of_block"
     @@
@@ -257,54 +279,25 @@ module Make_check (Check : CHECKSUM) (B : DISK) = struct
     let+ (t : S.t) = S.of_block () in
     T ((module S), t)
 
-  let flush (T ((module S), t)) =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.flush@." ;
-    or_fail S.pp_error "Notafs.flush" @@ S.flush t
-
-  let exists (T ((module S), t)) filename =
-    catch'
-    @@ fun () ->
-    if debug then Format.printf "Notafs.exists@." ;
-    let filename = split_filename filename in
-    S.exists t filename
+  let flush (T ((module S), t)) = or_fail S.pp_error "Notafs.flush" @@ S.flush t
+  let exists (T ((module S), t)) filename = S.exists t (split_filename filename)
 
   type file = File : (module S with type t = 'a and type file = 'b) * 'a * 'b -> file
 
   let find (T ((module S), t)) filename =
-    catch'
-    @@ fun () ->
-    if debug then Format.printf "Notafs.find %S@." filename ;
-    let filename = split_filename filename in
-    match S.find_opt t filename with
+    match S.find_opt t (split_filename filename) with
     | None -> None
     | Some file -> Some (File ((module S), t, file))
 
-  let filename (File ((module S), _, file)) =
-    catch'
-    @@ fun () ->
-    if debug then Format.printf "Notafs.filename@." ;
-    S.filename file
+  let filename (File ((module S), _, file)) = S.filename file
 
   let remove (T ((module S), t)) filename =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.remove@." ;
-    let filename = split_filename filename in
-    or_fail S.pp_error "Notafs.remove" @@ S.remove t filename
+    or_fail S.pp_error "Notafs.remove" @@ S.remove t (split_filename filename)
 
   let replace (T ((module S), t)) filename contents =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.replace@." ;
-    let filename = split_filename filename in
-    or_fail S.pp_error "Notafs.replace" @@ S.replace t filename contents
+    or_fail S.pp_error "Notafs.replace" @@ S.replace t (split_filename filename) contents
 
   let touch (T ((module S), t)) filename contents =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.touch %S@." filename ;
     or_fail S.pp_error "Notafs.touch"
     @@
     let open Lwt_result.Syntax in
@@ -313,36 +306,22 @@ module Make_check (Check : CHECKSUM) (B : DISK) = struct
     File ((module S), t, file)
 
   let rename (T ((module S), t)) ~src ~dst =
-    catch
-    @@ fun () ->
     if debug then Format.printf "Notafs.rename@." ;
     let src = split_filename src in
     let dst = split_filename dst in
     or_fail S.pp_error "Notafs.rename" @@ S.rename t ~src ~dst
 
   let append_substring (File ((module S), _, file)) str ~off ~len =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.append_substring@." ;
     or_fail S.pp_error "Notafs.append_substring" @@ S.append_substring file str ~off ~len
 
   let blit_to_bytes (File ((module S), _, file)) ~off ~len bytes =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.blit_to_bytes@." ;
     or_fail S.pp_error "Notafs.blit_to_bytes" @@ S.blit_to_bytes file ~off ~len bytes
 
   let blit_from_string (File ((module S), t, file)) ~off ~len string =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.blit_from_string@." ;
     or_fail S.pp_error "Notafs.blit_from_string"
     @@ S.blit_from_string t file ~off ~len string
 
   let size (File ((module S), _, file)) =
-    catch
-    @@ fun () ->
-    if debug then Format.printf "Notafs.size@." ;
     or_fail S.pp_error "Notafs.size"
     @@
     let open Lwt_result.Syntax in
@@ -354,6 +333,7 @@ end
 module No_checksum = struct
   type t = unit
 
+  let name = "NO-CHECK"
   let equal = ( = )
   let default = ()
   let digest_bigstring _ _ _ _ = ()
@@ -367,9 +347,22 @@ end
 module Adler32 = struct
   include Checkseum.Adler32
 
-  let byte_size = 8
+  let name = "ADLER-32"
+  let byte_size = 4
   let read cstruct offset = of_int32 @@ Cstruct.HE.get_uint32 cstruct offset
   let write cstruct offset v = Cstruct.HE.set_uint32 cstruct offset (to_int32 v)
 end
 
 module Make (B : DISK) = Make_check (Adler32) (B)
+
+let metadatas (type a) (module Block : DISK with type t = a) (block : a) =
+  let open Lwt.Syntax in
+  let* (module A_disk) = Context.of_impl (module Block) (module No_checksum) block in
+  let (module H) =
+    (module Header.Make (A_disk) : Header.CONFIG with type error = A_disk.error)
+  in
+  let+ result = H.load_config () in
+  match result with
+  | Ok config -> Ok config
+  | Error `Disk_not_formatted -> Error `Disk_not_formatted
+  | Error _ -> failwith "error"

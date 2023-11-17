@@ -43,6 +43,7 @@ module Make (B : Context.A_DISK) : sig
   val get_child_ptr : t -> int -> ptr r
   val set_child_ptr : t -> int -> ptr -> unit r
   val erase_region : t -> off:int -> len:int -> unit r
+  val detach_region : t -> off:int -> len:int -> unit r
   val blit_from_string : string -> int -> t -> int -> int -> unit r
   val blit_to_bytes : t -> int -> bytes -> int -> int -> unit r
 

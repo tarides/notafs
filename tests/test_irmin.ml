@@ -1,3 +1,8 @@
+(* TODO: Create a small disk
+
+   $ dd if=/dev/zero of=/tmp/notafs-irmin count=400
+*)
+
 module B = Block_viz.Make (Block)
 
 module Clock = struct
@@ -67,9 +72,10 @@ let main ~fresh ~factor ~stress () =
       disconnect block
     end
   in
+  let store_root = "/foo/bar" in
   let block = connect root in
   let () = Lwt_direct.direct @@ fun () -> Io.init block in
-  let repo = Store.Repo.v (Store.config ~fresh "/") in
+  let repo = Store.Repo.v (Store.config ~fresh store_root) in
   Store.Repo.close repo ;
   Io.notafs_flush () ;
   disconnect block ;
@@ -79,7 +85,7 @@ let main ~fresh ~factor ~stress () =
       fun fn ->
       let block = connect root in
       let () = Lwt_direct.direct @@ fun () -> Io.init block in
-      let repo = Store.Repo.v (Store.config ~fresh:false "/") in
+      let repo = Store.Repo.v (Store.config ~fresh:false store_root) in
       let main = Store.main repo in
       Fun.protect
         (fun () -> fn repo main)
@@ -89,7 +95,7 @@ let main ~fresh ~factor ~stress () =
     else begin
       let block = connect root in
       let () = Lwt_direct.direct @@ fun () -> Io.init block in
-      let repo = Store.Repo.v (Store.config ~fresh:false "/") in
+      let repo = Store.Repo.v (Store.config ~fresh:false store_root) in
       fun fn ->
         let main = Store.main repo in
         fn repo main
@@ -155,6 +161,12 @@ let main ~fresh ~factor ~stress () =
     if i > 100 && i mod 20 = 0 then do_gc ()
   done ;
   ()
+
+let main ~fresh ~factor ~stress () =
+  try main ~fresh ~factor ~stress () with
+  | Store.Maker.Fs.Fs err as exn ->
+    Format.printf "ERROR: %a@." Store.Maker.Fs.pp_error err ;
+    raise exn
 
 (* cmdliner *)
 open Cmdliner

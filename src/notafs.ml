@@ -15,3 +15,5 @@ module Make_disk = Main.Make_disk
 module Make_check = Main.Make_check
 module Make = Main.Make
 module KV = Kv.Make
+
+let metadatas = Main.metadatas

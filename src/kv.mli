@@ -10,9 +10,9 @@ module Make (Check : Main.CHECKSUM) (Block : Main.DISK) : sig
     | `All_generations_corrupted
     | `Disk_not_formatted
     | `Wrong_page_size of int
-    | `Wrong_disk_size
+    | `Wrong_disk_size of Int64.t
+    | `Wrong_checksum_algorithm of string * int
     | `Unsupported_operation of string
-    | `Disk_failed
     ]
 
   type write_error = error

@@ -19,7 +19,7 @@ To run the unikernel demos, you'll need to pin the `notafs` library, copy the `u
 ```shell
 # Pin the library
 $ cd notafs
-notafs/ $ opam pin . -ny --with-version=dev
+notafs/ $ opam pin . --with-version=dev
 
 # Copy the demos to another folder
 notafs/ $ cp -r unikernel-kv ../unikernel-kv
@@ -43,7 +43,7 @@ The Irmin demo relies on OCaml 5 support for algebraic effects: While the `irmin
 $ opam switch 5.0.0
 
 # Enable experimental support for OCaml 5 on solo5:
-$ opam pin https://github.com/mirage/ocaml-solo5.git#500-cleaned -ny
+$ opam pin https://github.com/mirage/ocaml-solo5.git#500-cleaned
 ```
 
 ## Notafs-CLI
@@ -55,7 +55,7 @@ In order to use the CLI, first install the package and create a disk:
 ```shell
 # Pin the library
 $ cd notafs
-notafs/ $ opam pin . -ny --with-version=dev
+notafs/ $ opam pin . --with-version=dev
 
 # Create a disk
 $ dd if=/dev/zero of=/tmp/storage count=400
@@ -101,7 +101,7 @@ Lastly those functions will help you have a better understanding of the content 
 
 ```shell
 # Dump general informations on the disk into the standard output:
-notafs/ $ notafs-cli info -d/tmp/storage
+notafs/ $ notafs-cli info /tmp/storage
 
 # Dump a file `foo` from the disk into the standard output:
 notafs/ $ notafs-cli cat -d/tmp/storage foo

@@ -95,22 +95,20 @@ module Make (B : Context.A_DISK) = struct
     C.write cstruct root_checksum_offset C.default ;
     C.digest_bigstring (cstruct_to_bigarray cstruct) 0 B.page_size C.default
 
+  let invalid_checksum id = Lwt_result.fail (`Invalid_checksum (B.Id.to_int64 id))
+
   let check_root_checksum ~id cstruct =
     let* cstruct = B.cstruct cstruct in
     let cs = C.read cstruct root_checksum_offset in
     let expected = compute_root_checksum cstruct in
-    if C.equal cs expected
-    then Lwt_result.return ()
-    else Lwt_result.fail (`Invalid_checksum id)
+    if C.equal cs expected then Lwt_result.return () else invalid_checksum id
 
   let verify_checksum t =
     match t.id, t.checksum with
     | At id, Some cs ->
       let* cstruct = ro_cstruct t in
       let cs' = get_checksum cstruct in
-      if C.equal cs cs'
-      then Lwt_result.return ()
-      else Lwt_result.fail (`Invalid_checksum id)
+      if C.equal cs cs' then Lwt_result.return () else invalid_checksum id
     | Root id, None -> check_root_checksum ~id t.cstruct
     | In_memory, None -> Lwt_result.return ()
     | _ -> assert false
@@ -179,17 +177,9 @@ module Make (B : Context.A_DISK) = struct
         assert (child.depth = t.depth + 1) ;
         ()
       | Detached ->
-        if H.length t.children = 0
-        then begin
-          assert (t.parent = Detached) ;
-          assert (t.depth = 0) ;
-          t.depth <- child.depth - 1
-        end
-        else begin
-          assert (H.length child.children = 0) ;
-          assert (child.depth = 0) ;
-          child.depth <- t.depth + 1
-        end
+        if H.length child.children = 0
+        then child.depth <- t.depth + 1
+        else decr_depth t (child.depth - 1)
       | _ -> failwith "set_child: would lose parent"
     end ;
     child.parent <- Parent (t, offset) ;
@@ -203,6 +193,16 @@ module Make (B : Context.A_DISK) = struct
         | self -> assert (self == child)
         | exception Not_found -> H.replace t.children offset child
       end
+    end
+
+  and decr_depth t depth =
+    if t.depth <= depth
+    then ()
+    else begin
+      t.depth <- depth ;
+      match t.parent with
+      | Parent (parent, _) -> decr_depth parent (depth - 1)
+      | Detached -> ()
     end
 
   let finalize_set_id t () =
@@ -290,6 +290,22 @@ module Make (B : Context.A_DISK) = struct
     B.unallocate t.cstruct ;
     t.id <- Freed ;
     drop_from_parent t
+
+  let detach_region t ~off ~len =
+    let* () = release t in
+    let+ cstruct = rw_cstruct t in
+    Cstruct.blit cstruct (off + len) cstruct off (Cstruct.length cstruct - off - len) ;
+    for i = Cstruct.length cstruct - len to Cstruct.length cstruct - 1 do
+      Cstruct.set_uint8 cstruct i 0
+    done ;
+    for i = off to off + len - 1 do
+      match H.find_opt t.children i with
+      | None -> ()
+      | Some child ->
+        assert (child.id <> Freed) ;
+        child.parent <- Detached ;
+        H.remove t.children i
+    done
 
   let erase_region t ~off ~len =
     let* () = release t in

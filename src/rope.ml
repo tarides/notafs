@@ -19,6 +19,7 @@ module Make (B : Context.A_DISK) = struct
   let child_index i = key_index i + key_size
   let max_children t = (Sector.length t - header_size) / child_size
   let get_key t i = Sector.get_uint32 t (key_index i)
+  let set_key t i v = Sector.set_uint32 t (key_index i) v
   let get_child t i = Sector.get_child t (child_index i)
   let set_child t i v = Sector.set_child t (child_index i) v
 
@@ -87,8 +88,6 @@ module Make (B : Context.A_DISK) = struct
       let* nb = get_nb_children t in
       if nb = 0 then Lwt_result.return 0 else get_key t (nb - 1)
 
-  let set_key t i v = Sector.set_uint32 t (key_index i) v
-
   let create () =
     let* t = Sector.create () in
     let* () = set_height t 0 in
@@ -138,7 +137,10 @@ module Make (B : Context.A_DISK) = struct
       | Rest i' when i = i' ->
         (* no progress, child is full *)
         if len >= max_children t
-        then Lwt_result.return (t, Rest i)
+        then begin
+          let* retry = compact t in
+          if retry then do_append t (str, i, str_len) else Lwt_result.return (t, Rest i)
+        end
         else begin
           let* leaf = Leaf.create () in
           let* () = set_nb_children t (len + 1) in
@@ -151,6 +153,59 @@ module Make (B : Context.A_DISK) = struct
         let* key_last_index = get_key t last_index in
         let* () = set_key t last_index (key_last_index + i' - i) in
         do_append t (str, i', str_len)
+    end
+
+  and compact t =
+    let* height = get_height t in
+    assert (height > 0) ;
+    if height = 1
+    then Lwt_result.return false
+    else begin
+      let* len = get_nb_children t in
+      assert (len = max_children t) ;
+      let last_index = len - 1 in
+      let* last_child = get_child t last_index in
+      let* child_height = get_height last_child in
+      if height = child_height + 1
+      then Lwt_result.return false
+      else begin
+        let rec go i nb acc =
+          if i < 0
+          then Lwt_result.return (nb, acc)
+          else begin
+            let* child = get_child t i in
+            let* h = get_height child in
+            assert (h >= child_height) ;
+            if h > child_height
+            then Lwt_result.return (nb, acc)
+            else go (i - 1) (nb + 1) (child :: acc)
+          end
+        in
+        let* nb, children = go (last_index - 1) 1 [ last_child ] in
+        let off = key_index (len - nb) in
+        let* () = Sector.detach_region t ~off ~len:(nb * child_size) in
+        let* () = set_nb_children t (len - nb + 1) in
+        let* new_parent = create () in
+        let* () = set_height new_parent (child_height + 1) in
+        let* () = set_child t (len - nb) new_parent in
+        let* () = set_nb_children new_parent nb in
+        let rec go i at = function
+          | [] -> Lwt_result.return ()
+          | c :: cs ->
+            let* s = size c in
+            let at = at + s in
+            let* () = set_key new_parent i at in
+            let* () = set_child new_parent i c in
+            go (i + 1) at cs
+        in
+        let* () = go 0 0 children in
+        let* prev_at =
+          if len - nb = 0 then Lwt_result.return 0 else get_key t (len - nb - 1)
+        in
+        let* s = size new_parent in
+        let* () = set_key t (len - nb) (prev_at + s) in
+        Lwt_result.return true
+      end
     end
 
   let rec append_from t (str, i, str_len) =

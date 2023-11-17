@@ -168,32 +168,6 @@ module Make (B : Context.A_DISK) = struct
            load_gens nb_roots nb s (i + 1) (Int64.succ expected_gen) (g :: acc)
          | Error _ -> load_gens nb_roots nb s (i + 1) (Int64.succ expected_gen) acc)
 
-  let load_header () =
-    let* s = Sector.load_root ~check:false (B.Id.of_int 0) in
-    (* check magic number *)
-    let* magic = Header.get_magic s in
-    let* () =
-      if magic <> Header.magic
-      then Lwt_result.fail `Disk_not_formatted
-      else Lwt_result.return ()
-    in
-    (* check page size *)
-    let* page_size = Header.get_page_size s in
-    let* () =
-      if page_size <> B.page_size
-      then Lwt_result.fail (`Wrong_page_size page_size)
-      else Lwt_result.return ()
-    in
-    (* check disk size *)
-    let* disk_size = Header.get_disk_size s in
-    let* () =
-      if disk_size <> B.nb_sectors
-      then Lwt_result.fail `Wrong_disk_size
-      else Lwt_result.return ()
-    in
-    let+ () = Sector.verify_checksum s in
-    s
-
   let rec load_roots nb_roots i acc =
     if i >= nb_roots
     then Lwt_result.return acc
@@ -204,7 +178,7 @@ module Make (B : Context.A_DISK) = struct
       load_roots nb_roots (i + 1) ((first_gen, s) :: acc)
 
   let load ~check () =
-    let* header = load_header () in
+    let* header = Header.load () in
     let* nb_roots = Header.get_roots header in
     let* roots = load_roots nb_roots 0 [] in
     let roots = List.sort (fun (a, _) (b, _) -> Int64.compare b a) roots in

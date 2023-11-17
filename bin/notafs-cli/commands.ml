@@ -27,15 +27,16 @@ let string_of_disk_space space =
   then Int64.to_string (Int64.div space mb) ^ "mb"
   else Int64.to_string (Int64.div space gb) ^ "gb"
 
-let info_cmd disk =
+let info_cmd block =
   let infos () =
-    let page_size = Int64.of_int (Disk.page_size disk) in
-    let disk_space = Int64.mul (Disk.disk_space disk) page_size in
-    let free_space = Int64.mul (Disk.free_space disk) page_size in
-    Fmt.pr "Disk space: %s@." (string_of_disk_space disk_space) ;
-    Fmt.pr "Free space: %s@." (string_of_disk_space free_space) ;
-    Fmt.pr "Sector size: %s@." (string_of_disk_space page_size) ;
-    Lwt_result.return ()
+    let+ config = Notafs.metadatas (module Block) block in
+    let disk_size = Int64.mul config.disk_size (Int64.of_int config.page_size) in
+    Fmt.pr "Disk space: %s@." (string_of_disk_space disk_size) ;
+    Fmt.pr "Sector size: %s@." (string_of_disk_space @@ Int64.of_int config.page_size) ;
+    Fmt.pr
+      "Checksum: %s with %i bits@."
+      config.checksum_algorithm
+      (8 * config.checksum_byte_size)
   in
   on_error "info" @@ Lwt_main.run (infos ())
 
@@ -215,7 +216,7 @@ let format_cmd =
 let info_cmd =
   let doc = "show available disk space" in
   let info = Cmd.info "info" ~doc in
-  Cmd.v info Term.(const info_cmd $ disk)
+  Cmd.v info Term.(const info_cmd $ block)
 
 (* Touch *)
 let touch_cmd =
