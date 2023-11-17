@@ -111,4 +111,7 @@ notafs/ $ notafs-cli stats -d/tmp/storage foo
 
 # List all the files/subdirectories of the folder `files`:
 notafs/ $ notafs-cli list -d/tmp/storage files
+
+# Recursive list of all the files/subdirectories of the folder `files` in the form of a tree:
+notafs/ $ notafs-cli tree -d/tmp/storage files
 ```

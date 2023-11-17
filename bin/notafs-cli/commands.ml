@@ -177,13 +177,12 @@ let tree disk path =
       let indent_hd = if j <> n - 1 then "├── " else "└── " in
       Fmt.pr "%s%s%a@." indent_tl indent_hd (styled t Fmt.string) basename ;
       let indent_tl = indent_tl ^ if j <> n - 1 then "│   " else "    " in
-      tree (i + 1, indent_tl) key
+      if t = `Dictionary then tree (i + 1, indent_tl) key else Lwt_result.return ()
     in
     List.fold_left Lwt_result.bind (Lwt_result.return ()) @@ List.mapi dump files
   in
   let tree () =
     let key = Mirage_kv.Key.v path in
-    Fmt.pr "path: %S@." path ;
     let* t = Disk.exists disk key in
     match t with
     | Some `Dictionary ->

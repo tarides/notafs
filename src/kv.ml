@@ -83,9 +83,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
 
   let exists (T ((module S), t)) key =
     let filename = Mirage_kv.Key.segments key in
-    match S.find_opt t filename with
-    | None -> Lwt.return_ok None
-    | Some _ -> Lwt.return_ok (Some `Value)
+    Lwt.return_ok (S.exists t filename)
 
   let get (T ((module S), t)) key =
     let filename = Mirage_kv.Key.segments key in
