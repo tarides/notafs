@@ -224,7 +224,17 @@ let of_impl
     let lru = Lru.make ()
     let safe_lru = ref true
     let available_cstructs = ref []
-    let release_cstructs cstructs = available_cstructs := cstructs :: !available_cstructs
+    let nb_available = ref 0
+    let max_lru_size = 2048
+    let min_lru_size = max_lru_size / 2
+
+    let release_cstructs cstructs =
+      if !nb_available + Lru.length lru > max_lru_size
+      then ()
+      else begin
+        incr nb_available ;
+        available_cstructs := cstructs :: !available_cstructs
+      end
 
     let unallocate elt =
       let t = Lru.value elt in
@@ -249,9 +259,6 @@ let of_impl
         | Freed -> failwith "Context.set_id: Freed"
       end ;
       Lru.detach_remove elt lru
-
-    let max_lru_size = 2048
-    let min_lru_size = max_lru_size / 2
 
     let rec write_all = function
       | [] -> Lwt_result.return ()
@@ -348,6 +355,7 @@ let of_impl
               let* fin = old.finalize () in
               match fin with
               | Error page_id ->
+                release_cstructs [ _cstruct ] ;
                 old.cstruct <- On_disk page_id ;
                 (*
                    let fake_cstruct = Cstruct.create page_size in
@@ -375,17 +383,21 @@ let of_impl
       match !available_cstructs with
       | [] -> Cstruct.create page_size
       | [ c ] :: css ->
+        decr nb_available ;
         available_cstructs := css ;
         cstruct_reset c
-      | [] :: _ -> assert false
       | (c :: cs) :: css ->
+        decr nb_available ;
         available_cstructs := cs :: css ;
         cstruct_reset c
+      | [] :: _ -> assert false
 
     let allocate ~from () =
-      let sector = { cstruct = Cstruct (cstruct_create ()); finalize = no_finalizer } in
+      let sector () =
+        { cstruct = Cstruct (cstruct_create ()); finalize = no_finalizer }
+      in
       match from with
-      | `Root -> Lwt_result.return (Lru.make_detached sector)
+      | `Root -> Lwt_result.return (Lru.make_detached (sector ()))
       | `Load -> begin
         let open Lwt_result.Syntax in
         let make_room () =
@@ -399,7 +411,7 @@ let of_impl
           end
         in
         let+ () = make_room () in
-        Lru.make_elt sector lru
+        Lru.make_elt (sector ()) lru
       end
 
     let set_finalize s fn = s.finalize <- fn

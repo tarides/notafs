@@ -96,6 +96,18 @@ module Make (B : Context.A_DISK) = struct
 
   let load ptr = if Sector.is_null_ptr ptr then create () else Sector.load ptr
 
+  module Parseq = struct
+    let empty = Lwt_result.return (fun () -> Lwt_result.return ())
+
+    let exec a =
+      let* fn = a in
+      fn ()
+
+    let seq a b () =
+      let* () = exec a in
+      b ()
+  end
+
   let rec verify_checksum t =
     let* () = Sector.verify_checksum t in
     let* height = get_height t in
@@ -104,17 +116,16 @@ module Make (B : Context.A_DISK) = struct
       let* nb_children = get_nb_children t in
       let rec check_child i acc =
         if i > nb_children - 1
-        then acc
+        then Parseq.exec acc
         else begin
           let acc =
-            let* t = get_child t i in
-            let* () = verify_checksum t in
-            acc
+            let+ t = get_child t i in
+            Parseq.seq acc @@ fun () -> verify_checksum t
           in
           check_child (i + 1) acc
         end
       in
-      check_child 0 (Lwt_result.return ())
+      check_child 0 Parseq.empty
     else Lwt_result.return ()
 
   let rec do_append t (str, i, str_len) =
@@ -237,10 +248,10 @@ module Make (B : Context.A_DISK) = struct
     else begin
       let requested_read_length = n in
       let* t_nb_children = get_nb_children t in
-      let rec go k j n acc =
+      let rec go k j n do_children =
         if k >= t_nb_children || n <= 0
         then
-          let+ () = acc in
+          let+ () = Parseq.exec do_children in
           n
         else begin
           let* offs_stop = get_key t k in
@@ -250,24 +261,25 @@ module Make (B : Context.A_DISK) = struct
           let sub_i = max 0 (i - offs_start) in
           let quantity = min n (len - sub_i) in
           assert (quantity <= 0 = (i >= offs_stop)) ;
-          let j, n, acc =
+          let j, n, do_children =
             if i >= offs_stop
-            then j, n, acc
+            then j, n, do_children
             else begin
-              let lwt =
-                let* child = get_child t k in
+              let do_children =
+                let+ child = get_child t k in
                 assert (sub_i >= 0) ;
-                let* q = blit_to_bytes ~depth:(depth + 1) child sub_i bytes j quantity in
-                assert (q = quantity) ;
-                acc
+                Parseq.seq do_children
+                @@ fun () ->
+                let+ q = blit_to_bytes ~depth:(depth + 1) child sub_i bytes j quantity in
+                assert (q = quantity)
               in
-              j + quantity, n - quantity, lwt
+              j + quantity, n - quantity, do_children
             end
           in
-          go (k + 1) j n acc
+          go (k + 1) j n do_children
         end
       in
-      let+ rest = go 0 j n (Lwt_result.return ()) in
+      let+ rest = go 0 j n Parseq.empty in
       assert (rest >= 0) ;
       requested_read_length - rest
     end
@@ -353,17 +365,16 @@ module Make (B : Context.A_DISK) = struct
         let* n = get_nb_children t in
         let rec go i acc =
           if i >= n
-          then acc
+          then Parseq.exec acc
           else begin
             let acc =
-              let* child = get_child t i in
-              let* () = free child in
-              acc
+              let+ child = get_child t i in
+              Parseq.seq acc @@ fun () -> free child
             in
             go (i + 1) acc
           end
         in
-        go 0 (Lwt_result.return ())
+        go 0 Parseq.empty
       end
     in
     Sector.drop_release t
