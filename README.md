@@ -12,7 +12,7 @@ As a work-in-progress demo, `notafs` includes a partial implementation of the [`
 
 The tests include a visualization of Irmin running on a Mirage block device, performing commits and garbage collection. Each 1kb sector is represented by a 32x32 pixel square (colored pages contain live data, grey ones are free). Epilepsy warning: this recording of the test below contains flashing lights.
 
-https://github.com/art-w/notafs/assets/4807590/82a33898-5938-42ba-8376-f2b89748878b
+https://github.com/art-w/notafs/assets/4807590/5bff0478-0b94-4bcb-a5fc-7cc6fcb57531
 
 To run the unikernel demos, you'll need to pin the `notafs` library, copy the `unikernel-kv` folder out of the project (to avoid recursive issues with `opam-monorepo`), compile for your prefered target and create a disk to use:
 
