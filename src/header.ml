@@ -3,6 +3,7 @@ type config =
   ; page_size : int
   ; checksum_algorithm : string
   ; checksum_byte_size : int
+  ; format_uid : Int64.t
   }
 
 module type CONFIG = sig
@@ -25,6 +26,7 @@ module Make (B : Context.A_DISK) : sig
   val get_disk_size : t -> int64 io
   val get_page_size : t -> int io
   val get_roots : t -> int io
+  val get_format_uid : t -> int64 io
   val create : disk_size:int64 -> page_size:int -> Sector.t io
   val load : unit -> Sector.t io
   val load_config : unit -> config io
@@ -43,9 +45,18 @@ end = struct
     ; roots : int Schema.field
     ; checksum_byte_size : int Schema.field
     ; checksum_algorithm : int64 Schema.field
+    ; format_uid : int64 Schema.field
     }
 
-  let { magic; disk_size; page_size; roots; checksum_byte_size; checksum_algorithm } =
+  let { magic
+      ; disk_size
+      ; page_size
+      ; roots
+      ; checksum_byte_size
+      ; checksum_algorithm
+      ; format_uid
+      }
+    =
     Schema.define
     @@
     let open Schema.Syntax in
@@ -54,8 +65,16 @@ end = struct
     and+ page_size = Schema.uint32
     and+ roots = Schema.uint32
     and+ checksum_byte_size = Schema.uint8
-    and+ checksum_algorithm = Schema.uint64 in
-    { magic; disk_size; page_size; roots; checksum_byte_size; checksum_algorithm }
+    and+ checksum_algorithm = Schema.uint64
+    and+ format_uid = Schema.uint64 in
+    { magic
+    ; disk_size
+    ; page_size
+    ; roots
+    ; checksum_byte_size
+    ; checksum_algorithm
+    ; format_uid
+    }
 
   include struct
     open Schema.Infix
@@ -68,6 +87,8 @@ end = struct
     let get_page_size t = t.@(page_size)
     let set_roots t v = t.@(roots) <- v
     let get_roots t = t.@(roots)
+    let set_format_uid t v = t.@(format_uid) <- v
+    let get_format_uid t = t.@(format_uid)
   end
 
   let int64_of_string s =
@@ -90,13 +111,25 @@ end = struct
   let magic = 0x534641544F4EL (* NOTAFS *)
   let () = assert (magic = int64_of_string "NOTAFS")
 
+  let random_format_uid () =
+    let cstruct = Cstruct.create B.page_size in
+    let+ () = B.read (B.Id.of_int 0) cstruct in
+    let acc = ref 0L in
+    for i = 0 to (Cstruct.length cstruct / 8) - 1 do
+      let x = Cstruct.HE.get_uint64 cstruct (i * 8) in
+      acc := Int64.logxor !acc x
+    done ;
+    !acc
+
   let create ~disk_size ~page_size =
     let open Schema.Infix in
+    let* format_uid = random_format_uid () in
     let* s = Sector.create ~at:(Sector.root_loc @@ B.Id.of_int 0) () in
     let* () = set_magic s magic in
     let* () = set_disk_size s disk_size in
     let* () = set_page_size s page_size in
     let* () = set_roots s 4 in
+    let* () = set_format_uid s format_uid in
     let* () = s.@(checksum_byte_size) <- B.C.byte_size in
     let+ () = s.@(checksum_algorithm) <- int64_of_string B.C.name in
     s
@@ -112,6 +145,7 @@ end = struct
     in
     let* disk_size = get_disk_size s in
     let* page_size = get_page_size s in
+    let* format_uid = get_format_uid s in
     let* checksum_byte_size = s.@(checksum_byte_size) in
     let+ checksum_algorithm = s.@(checksum_algorithm) in
     let config =
@@ -119,6 +153,7 @@ end = struct
       ; page_size
       ; checksum_byte_size
       ; checksum_algorithm = string_of_int64 checksum_algorithm
+      ; format_uid
       }
     in
     config, s
