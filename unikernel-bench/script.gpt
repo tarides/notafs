@@ -1,0 +1,18 @@
+set terminal pngcairo truecolor size 1200,500
+set output './stats.png'
+set multiplot layout 1,2
+set format y "%3gms"
+set xlabel 'file size (in KiloBytes)'
+set ylabel 'time'
+set title 'Set'
+plot 'bench' index 0 using 1:($2 / 1e6) with lines lw 2 title 'Notafs',\
+     'bench' index 1 using 1:($2 / 1e6) with lines lw 2 title 'Tar',\
+     'bench' index 3 using 1:($2 / 1e6) with lines lw 2 title 'Chamelon',\
+     'bench' index 4 using 1:($2 / 1e6) with lines lw 2 title 'Fat'
+set title 'Get'
+set yrange [0:100]
+plot 'bench' index 0 using 1:($3 / 1e6) with lines lw 2 title 'Notafs',\
+     'bench' index 1 using 1:($3 / 1e6) with lines lw 2 title 'Tar',\
+     'bench' index 3 using 1:($3 / 1e6) with lines lw 2 title 'Chamelon',\
+     'bench' index 4 using 1:($3 / 1e6) with lines lw 2 title 'Fat',\
+     'bench' index 2 using 1:($2 / 1e6) with lines lw 2 title 'Docteur'
