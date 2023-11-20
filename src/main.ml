@@ -24,9 +24,9 @@ module type S = sig
   val filename : file -> string
   val size : file -> int io
   val exists : t -> key -> [> `Dictionary | `Value ] option
-  val append_substring : file -> string -> off:int -> len:int -> unit io
+  val append_substring : t -> file -> string -> off:int -> len:int -> unit io
   val blit_from_string : t -> file -> off:int -> len:int -> string -> unit io
-  val blit_to_bytes : file -> off:int -> len:int -> bytes -> int io
+  val blit_to_bytes : t -> file -> off:int -> len:int -> bytes -> int io
   val rename : t -> src:key -> dst:key -> unit io
   val touch : t -> key -> string -> file io
   val replace : t -> key -> string -> unit io
@@ -53,6 +53,7 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
     { root : Root.t
     ; mutable files : Files.t
     ; mutable free_queue : Queue.q
+    ; lock : Lwt_mutex.t
     }
 
   let free_space t = t.free_queue.free_sectors
@@ -66,7 +67,8 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
     let* free_queue = Queue.load free_queue in
     let* () = Files.verify_checksum files in
     let+ () = Queue.verify_checksum free_queue in
-    { root; files; free_queue }
+    let lock = Lwt_mutex.create () in
+    { root; files; free_queue; lock }
 
   let reachable_size t =
     let roots = Root.reachable_size t.root in
@@ -118,8 +120,11 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
     of_root root
 
   let of_block () = Root.load ~check:of_root ()
+  let with_lock t fn = Lwt_mutex.with_lock t.lock fn
 
   let flush t =
+    with_lock t
+    @@ fun () ->
     assert !B.safe_lru ;
     B.safe_lru := false ;
     let* required = Files.count_new t.files in
@@ -151,11 +156,15 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
 
   let filename t = Files.filename (fst t)
 
-  let append_substring (_filename, rope) str ~off ~len =
+  let append_substring t (_filename, rope) str ~off ~len =
+    with_lock t
+    @@ fun () ->
     let+ t_rope = Rope.append_from !rope (str, off, off + len) in
     rope := t_rope
 
   let rename t ~src ~dst =
+    with_lock t
+    @@ fun () ->
     let+ files = Files.rename t.files ~src ~dst in
     t.files <- files
 
@@ -163,10 +172,14 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
   let exists t file = Files.exists t.files file
 
   let remove t filename =
+    with_lock t
+    @@ fun () ->
     let+ files = Files.remove t.files filename in
     t.files <- files
 
   let touch t filename str =
+    with_lock t
+    @@ fun () ->
     assert (Option.is_none @@ exists t filename) ;
     let* rope = Rope.of_string str in
     let r = ref rope in
@@ -175,17 +188,19 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
     filename, r
 
   let replace t filename str =
+    with_lock t
+    @@ fun () ->
     assert (Option.is_some @@ exists t filename) ;
     let prev = Files.find t.files filename in
     let* () = Rope.free !prev in
     let+ rope = Rope.of_string str in
     prev := rope
 
-  let blit_to_bytes filename ~off ~len bytes =
-    Files.blit_to_bytes filename ~off ~len bytes
+  let blit_to_bytes t filename ~off ~len bytes =
+    with_lock t @@ fun () -> Files.blit_to_bytes filename ~off ~len bytes
 
   let blit_from_string t filename ~off ~len bytes =
-    Files.blit_from_string t.files filename ~off ~len bytes
+    with_lock t @@ fun () -> Files.blit_from_string t.files filename ~off ~len bytes
 
   let find_opt t filename =
     match Files.find_opt t.files filename with
@@ -311,11 +326,12 @@ module Make_check (Check : CHECKSUM) (Block : DISK) = struct
     let dst = split_filename dst in
     or_fail S.pp_error "Notafs.rename" @@ S.rename t ~src ~dst
 
-  let append_substring (File ((module S), _, file)) str ~off ~len =
-    or_fail S.pp_error "Notafs.append_substring" @@ S.append_substring file str ~off ~len
+  let append_substring (File ((module S), t, file)) str ~off ~len =
+    or_fail S.pp_error "Notafs.append_substring"
+    @@ S.append_substring t file str ~off ~len
 
-  let blit_to_bytes (File ((module S), _, file)) ~off ~len bytes =
-    or_fail S.pp_error "Notafs.blit_to_bytes" @@ S.blit_to_bytes file ~off ~len bytes
+  let blit_to_bytes (File ((module S), t, file)) ~off ~len bytes =
+    or_fail S.pp_error "Notafs.blit_to_bytes" @@ S.blit_to_bytes t file ~off ~len bytes
 
   let blit_from_string (File ((module S), t, file)) ~off ~len string =
     or_fail S.pp_error "Notafs.blit_from_string"

@@ -92,7 +92,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
     | Some file ->
       let* size = lift_error @@ S.size file in
       let bytes = Bytes.create size in
-      let+ quantity = lift_error @@ S.blit_to_bytes file bytes ~off:0 ~len:size in
+      let+ quantity = lift_error @@ S.blit_to_bytes t file bytes ~off:0 ~len:size in
       assert (quantity = size) ;
       Bytes.unsafe_to_string bytes
 
@@ -106,7 +106,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
       assert (off >= 0) ;
       assert (off + length <= size) ;
       let bytes = Bytes.create length in
-      let+ quantity = lift_error @@ S.blit_to_bytes file bytes ~off ~len:length in
+      let+ quantity = lift_error @@ S.blit_to_bytes t file bytes ~off ~len:length in
       assert (quantity = size) ;
       Bytes.unsafe_to_string bytes
 
