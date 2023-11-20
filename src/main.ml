@@ -127,32 +127,34 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
     @@ fun () ->
     assert !B.safe_lru ;
     B.safe_lru := false ;
-    let* required = Files.count_new t.files in
-    let+ () =
-      if required = 0
-      then begin
-        assert (B.acquire_discarded () = []) ;
-        Lwt_result.return ()
+    Lwt.bind
+      begin
+        let* required = Files.count_new t.files in
+        if required = 0
+        then begin
+          assert (B.acquire_discarded () = []) ;
+          Lwt_result.return ()
+        end
+        else begin
+          let t_free_queue = t.free_queue in
+          let* free_queue = Queue.push_discarded t.free_queue in
+          let* free_queue, allocated = Queue.pop_front free_queue required in
+          assert (List.length allocated = required) ;
+          let* free_queue, to_flush_queue = Queue.self_allocate ~free_queue in
+          let* payload_root, to_flush, allocated = Files.to_payload t.files allocated in
+          assert (allocated = []) ;
+          let* () = Root.flush (List.rev_append to_flush_queue to_flush) in
+          let* free_queue = Root.update t.root ~queue:free_queue ~payload:payload_root in
+          assert (B.acquire_discarded () = []) ;
+          assert (t.free_queue == t_free_queue) ;
+          t.free_queue <- free_queue ;
+          B.flush () ;
+          check_size t
+        end
       end
-      else begin
-        let t_free_queue = t.free_queue in
-        let* free_queue = Queue.push_discarded t.free_queue in
-        let* free_queue, allocated = Queue.pop_front free_queue required in
-        assert (List.length allocated = required) ;
-        let* free_queue, to_flush_queue = Queue.self_allocate ~free_queue in
-        let* payload_root, to_flush, allocated = Files.to_payload t.files allocated in
-        assert (allocated = []) ;
-        let* () = Root.flush (List.rev_append to_flush_queue to_flush) in
-        let* free_queue = Root.update t.root ~queue:free_queue ~payload:payload_root in
-        assert (B.acquire_discarded () = []) ;
-        assert (t.free_queue == t_free_queue) ;
-        t.free_queue <- free_queue ;
-        B.flush () ;
-        check_size t
-      end
-    in
-    B.safe_lru := true ;
-    ()
+      (fun result ->
+        B.safe_lru := true ;
+        Lwt.return result)
 
   let filename t = Files.filename (fst t)
 
