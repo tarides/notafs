@@ -1,19 +1,6 @@
 (* checksum *)
 module type CHECKSUM = sig
-  type bigstring :=
-    (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
-
-  type t
-
-  val name : string
-  val byte_size : int
-  val default : t
-  val of_int32 : Int32.t -> t
-  val to_int32 : t -> Int32.t
-  val equal : t -> t -> bool
-  val digest_bigstring : bigstring -> int -> int -> t -> t
-  val read : Cstruct.t -> int -> t
-  val write : Cstruct.t -> int -> t -> unit
+  include Checksum.S
 end
 
 module No_checksum : CHECKSUM

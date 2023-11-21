@@ -41,15 +41,22 @@ module Make (B : Context.A_DISK) = struct
     | Disk of id * C.t
     | Mem of t
 
-  let cs_t : C.t Repr.t =
-    Repr.map Repr.int32 (fun cs -> C.of_int32 cs) (fun cs -> C.to_int32 cs)
+  let ptr_byte_size = B.Id.byte_size + C.byte_size
 
   let ptr_t : ptr Repr.t =
     Repr.map
-      Repr.(pair id_t cs_t)
-      (fun (id, cs) -> Disk (id, cs))
+      (Repr.string_of (`Fixed ptr_byte_size))
+      (fun str ->
+        let cstruct = Cstruct.of_string str in
+        let id = B.Id.read cstruct 0 in
+        let cs = B.C.read cstruct B.Id.byte_size in
+        Disk (id, cs))
       (function
-       | Disk (id, cs) -> id, cs
+       | Disk (id, cs) ->
+         let cstruct = Cstruct.create ptr_byte_size in
+         B.Id.write cstruct 0 id ;
+         B.C.write cstruct B.Id.byte_size cs ;
+         Cstruct.to_string cstruct
        | _ -> invalid_arg "Sector.ptr_t: serialize Mem")
 
   let to_ptr t =
@@ -66,23 +73,13 @@ module Make (B : Context.A_DISK) = struct
   let cs_size = C.byte_size
   let ptr_size = id_size + cs_size
   let is_null_id id = B.Id.equal null_id id
-  let is_null_cs cs = C.equal null_cs cs
   let null_ptr = Disk (null_id, null_cs)
 
   let is_null_ptr = function
-    | Disk (id, cs) -> is_null_id id && is_null_cs cs
+    | Disk (id, _) -> is_null_id id
     | Mem _ -> false
 
-  let cstruct_to_bigarray cstruct =
-    let open Cstruct in
-    assert (cstruct.off = 0) ;
-    assert (cstruct.len = B.page_size) ;
-    assert (cstruct.len = Bigarray.Array1.dim cstruct.buffer) ;
-    cstruct.buffer
-
-  let get_checksum cstruct =
-    C.digest_bigstring (Cstruct.to_bigarray cstruct) 0 B.page_size C.default
-
+  let get_checksum cstruct = C.digest cstruct
   let set_checksum cstruct offset cs = C.write cstruct (offset + id_size) cs
   let read_checksum cstruct offset = C.read cstruct (offset + id_size)
 
@@ -93,7 +90,7 @@ module Make (B : Context.A_DISK) = struct
 
   let compute_root_checksum cstruct =
     C.write cstruct root_checksum_offset C.default ;
-    C.digest_bigstring (cstruct_to_bigarray cstruct) 0 B.page_size C.default
+    C.digest cstruct
 
   let invalid_checksum id = Lwt_result.fail (`Invalid_checksum (B.Id.to_int64 id))
 
