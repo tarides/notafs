@@ -38,16 +38,8 @@ module Make (Check : Checksum.S) (Block : Mirage_block.S) = struct
     let+ r = lwt in
     match r with
     | Ok v -> Ok v
-    | Error `All_generations_corrupted -> Error `All_generations_corrupted
     | Error `Disk_is_full -> Error `No_space
-    | Error `Disk_not_formatted -> Error `Disk_not_formatted
-    | Error (`Invalid_checksum id) -> Error (`Invalid_checksum id)
-    | Error (`Read e) -> Error (`Read e)
-    | Error (`Write e) -> Error (`Write e)
-    | Error (`Wrong_page_size s) -> Error (`Wrong_page_size s)
-    | Error (`Wrong_disk_size s) -> Error (`Wrong_disk_size s)
-    | Error (`Wrong_checksum_algorithm (name, byte_size)) ->
-      Error (`Wrong_checksum_algorithm (name, byte_size))
+    | Error (#error as e) -> Error e
 
   module type S =
     Fs.S
@@ -87,28 +79,17 @@ module Make (Check : Checksum.S) (Block : Mirage_block.S) = struct
 
   let get (T ((module S), t)) key =
     let filename = Mirage_kv.Key.segments key in
-    match S.find_opt t filename with
+    let* result = lift_error @@ S.get t filename in
+    match result with
     | None -> Lwt_result.fail (`Not_found key)
-    | Some file ->
-      let* size = lift_error @@ S.size file in
-      let bytes = Bytes.create size in
-      let+ quantity = lift_error @@ S.blit_to_bytes t file bytes ~off:0 ~len:size in
-      assert (quantity = size) ;
-      Bytes.unsafe_to_string bytes
+    | Some contents -> Lwt_result.return contents
 
   let get_partial (T ((module S), t)) key ~offset ~length =
     let filename = Mirage_kv.Key.segments key in
-    match S.find_opt t filename with
+    let* result = lift_error @@ S.get_partial t filename ~offset ~length in
+    match result with
     | None -> Lwt_result.fail (`Not_found key)
-    | Some file ->
-      let* size = lift_error @@ S.size file in
-      let off = Optint.Int63.to_int offset in
-      assert (off >= 0) ;
-      assert (off + length <= size) ;
-      let bytes = Bytes.create length in
-      let+ quantity = lift_error @@ S.blit_to_bytes t file bytes ~off ~len:length in
-      assert (quantity = size) ;
-      Bytes.unsafe_to_string bytes
+    | Some contents -> Lwt_result.return contents
 
   let list (T ((module S), t)) key =
     let filename = Mirage_kv.Key.segments key in
@@ -143,23 +124,13 @@ module Make (Check : Checksum.S) (Block : Mirage_block.S) = struct
 
   let set (T ((module S), t)) key contents =
     let filename = Mirage_kv.Key.segments key in
-    let* () =
-      match S.find_opt t filename with
-      | None -> Lwt_result.return ()
-      | Some _ -> lift_error @@ S.remove t filename
-    in
     let* _ = lift_error @@ S.touch t filename contents in
     lift_error @@ S.flush t
 
   let set_partial (T ((module S), t)) key ~offset contents =
     let filename = Mirage_kv.Key.segments key in
-    match S.find_opt t filename with
-    | None -> Lwt_result.fail (`Not_found key)
-    | Some file ->
-      let off = Optint.Int63.to_int offset in
-      let len = String.length contents in
-      let* _ = lift_error @@ S.blit_from_string t file ~off ~len contents in
-      lift_error @@ S.flush t
+    let* ok = lift_error @@ S.set_partial t filename ~offset contents in
+    if ok then lift_error @@ S.flush t else Lwt_result.fail (`Not_found key)
 
   let remove (T ((module S), t)) key =
     let filename = Mirage_kv.Key.segments key in

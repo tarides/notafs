@@ -310,14 +310,16 @@ module Make (B : Context.A_DISK) = struct
     { t with files }
 
   let filename key = String.concat "/" key
-  let size (_, rope) = Rope.size !rope
+  let size rope = Rope.size !rope
+  let blit_to_bytes rope ~off ~len bytes = Rope.blit_to_bytes !rope off bytes 0 len
 
-  let blit_to_bytes (_filename, rope) ~off ~len bytes =
-    Rope.blit_to_bytes !rope off bytes 0 len
-
-  let blit_from_string _t (_filename, rope) ~off ~len str =
+  let blit_from_string rope ~off ~len str =
     let+ t = Rope.blit_from_string !rope off str 0 len in
     rope := t
+
+  let append_from rope arg =
+    let+ t_rope = Rope.append_from !rope arg in
+    rope := t_rope
 
   let list t path =
     let to_v = function
@@ -368,4 +370,10 @@ module Make (B : Context.A_DISK) = struct
       in
       go repr @@ M.bindings t.files
     end *)
+
+  let touch t filename str =
+    let* rope = Rope.of_string str in
+    let file = ref rope in
+    let+ files = add t filename file in
+    files, file
 end

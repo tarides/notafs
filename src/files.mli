@@ -3,42 +3,36 @@ module Make (B : Context.A_DISK) : sig
   module Rope : module type of Rope.Make (B)
 
   type key = string list
-  type file = Rope.t ref
+  type file
   type t
+  type 'a io := ('a, B.error) Lwt_result.t
 
-  val load : Sector.ptr -> (t, B.error) Lwt_result.t
-  val verify_checksum : t -> (unit, B.error) Lwt_result.t
+  val load : Sector.ptr -> t io
+  val verify_checksum : t -> unit io
 
-  val to_payload
-    :  t
-    -> Sector.id list
-    -> (Rope.t * (Sector.id * Cstruct.t) list * Sector.id list, B.error) Lwt_result.t
-
-  val count_new : t -> (int, B.error) Lwt_result.t
+  (* *)
   val exists : t -> key -> [> `Dictionary | `Value ] option
   val find : t -> key -> file
   val find_opt : t -> key -> file option
   val filename : key -> string
-  val size : key * file -> (int, B.error) Lwt_result.t
-  val add : t -> key -> file -> (t, B.error) Lwt_result.t
-  val remove : t -> key -> (t, B.error) Lwt_result.t
-  val rename : t -> src:key -> dst:key -> (t, B.error) Lwt_result.t
-
-  val blit_to_bytes
-    :  'a * Rope.t ref
-    -> off:int
-    -> len:int
-    -> bytes
-    -> (int, B.error) Lwt_result.t
-
-  val blit_from_string
-    :  'a
-    -> 'b * Rope.t ref
-    -> off:int
-    -> len:int
-    -> string
-    -> (unit, B.error) Lwt_result.t
-
-  val reachable_size : t -> (int, B.error) Lwt_result.t
+  val size : file -> int io
+  val add : t -> key -> file -> t io
+  val remove : t -> key -> t io
+  val rename : t -> src:key -> dst:key -> t io
+  val touch : t -> key -> string -> (t * file) io
+  val blit_to_bytes : file -> off:int -> len:int -> bytes -> int io
+  val blit_from_string : file -> off:int -> len:int -> string -> unit io
+  val append_from : file -> string * int * int -> unit io
   val list : t -> key -> (string * [> `Dictionary | `Value ]) list
+
+  (* *)
+
+  val count_new : t -> int io
+
+  val to_payload
+    :  t
+    -> Sector.id list
+    -> (Rope.t * (Sector.id * Cstruct.t) list * Sector.id list) io
+
+  val reachable_size : t -> int io
 end

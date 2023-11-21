@@ -32,6 +32,9 @@ module type S = sig
   val remove : t -> key -> unit io
   val find_opt : t -> key -> file option
   val list : t -> key -> (string * [ `Value | `Dictionary ]) list
+  val get : t -> key -> string option io
+  val get_partial : t -> key -> offset:Optint.Int63.t -> length:int -> string option io
+  val set_partial : t -> key -> offset:Optint.Int63.t -> string -> bool io
 end
 
 module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
@@ -46,7 +49,8 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
 
   let pp_error = B.pp_error
 
-  type key = string list
+  type key = Files.key
+  type file = key * Files.file
 
   type t =
     { root : Root.t
@@ -155,11 +159,8 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
 
   let filename t = Files.filename (fst t)
 
-  let append_substring t (_filename, rope) str ~off ~len =
-    with_lock t
-    @@ fun () ->
-    let+ t_rope = Rope.append_from !rope (str, off, off + len) in
-    rope := t_rope
+  let append_substring t ((_filename, rope) : file) str ~off ~len =
+    with_lock t @@ fun () -> Files.append_from rope (str, off, off + len)
 
   let rename t ~src ~dst =
     with_lock t
@@ -167,8 +168,8 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
     let+ files = Files.rename t.files ~src ~dst in
     t.files <- files
 
-  let size file = Files.size file
-  let exists t file = Files.exists t.files file
+  let size (_, file) = Files.size file
+  let exists t filename = Files.exists t.files filename
 
   let remove t filename =
     with_lock t
@@ -179,27 +180,60 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
   let touch t filename str =
     with_lock t
     @@ fun () ->
-    assert (Option.is_none @@ exists t filename) ;
-    let* rope = Rope.of_string str in
-    let r = ref rope in
-    let+ files = Files.add t.files filename r in
+    let+ files, rope = Files.touch t.files filename str in
     t.files <- files ;
-    filename, r
+    filename, rope
 
-  let blit_to_bytes t filename ~off ~len bytes =
-    with_lock t @@ fun () -> Files.blit_to_bytes filename ~off ~len bytes
+  let blit_to_bytes t (_, file) ~off ~len bytes =
+    with_lock t @@ fun () -> Files.blit_to_bytes file ~off ~len bytes
 
-  let blit_from_string t filename ~off ~len bytes =
-    with_lock t @@ fun () -> Files.blit_from_string t.files filename ~off ~len bytes
+  let blit_from_string t (_, file) ~off ~len bytes =
+    with_lock t @@ fun () -> Files.blit_from_string file ~off ~len bytes
 
   let find_opt t filename =
     match Files.find_opt t.files filename with
     | None -> None
     | Some file -> Some (filename, file)
 
-  type file = key * Files.file
-
   let list t prefix = Files.list t.files prefix
+
+  let get t filename =
+    with_lock t
+    @@ fun () ->
+    match Files.find_opt t.files filename with
+    | None -> Lwt_result.return None
+    | Some file ->
+      let* size = Files.size file in
+      let bytes = Bytes.create size in
+      let+ quantity = Files.blit_to_bytes file bytes ~off:0 ~len:size in
+      assert (quantity = size) ;
+      Some (Bytes.unsafe_to_string bytes)
+
+  let get_partial t filename ~offset ~length =
+    with_lock t
+    @@ fun () ->
+    match Files.find_opt t.files filename with
+    | None -> Lwt_result.return None
+    | Some file ->
+      let* size = Files.size file in
+      let off = Optint.Int63.to_int offset in
+      assert (off >= 0) ;
+      assert (off + length <= size) ;
+      let bytes = Bytes.create length in
+      let+ quantity = Files.blit_to_bytes file bytes ~off ~len:length in
+      assert (quantity = size) ;
+      Some (Bytes.unsafe_to_string bytes)
+
+  let set_partial t filename ~offset contents =
+    with_lock t
+    @@ fun () ->
+    match Files.find_opt t.files filename with
+    | None -> Lwt_result.return false
+    | Some file ->
+      let off = Optint.Int63.to_int offset in
+      let len = String.length contents in
+      let+ () = Files.blit_from_string file ~off ~len contents in
+      true
 end
 
 module Make_check (Check : CHECKSUM) (Block : Mirage_block.S) = struct
