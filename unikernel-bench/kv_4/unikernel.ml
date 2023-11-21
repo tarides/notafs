@@ -1,13 +1,6 @@
 open Lwt.Syntax
 
 module Main (Block : Mirage_block.S) = struct
-  module Block = struct
-    include Block
-
-    let discard _ _ = ()
-    let flush _ = ()
-  end
-
   let min = 1_000_000
   let max = 10_000_000
   let step = 500_000

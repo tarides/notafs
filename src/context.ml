@@ -41,6 +41,7 @@ module type A_DISK = sig
 
   val set_id : sector Lru.elt -> Id.t -> unit
   val lru : sector Lru.t
+  val protect_lru : (unit -> 'a Lwt.t) -> 'a Lwt.t
   val cstruct : sector Lru.elt -> (Cstruct.t, [> `Read of read_error ]) Lwt_result.t
   val cstruct_in_memory : sector Lru.elt -> Cstruct.t
   val read : Id.t -> Cstruct.t -> (unit, [> `Read of read_error ]) Lwt_result.t
@@ -48,7 +49,6 @@ module type A_DISK = sig
   val discard : Id.t -> unit
   val acquire_discarded : unit -> Id.t list
   val allocator : (int -> (Id.t list, error) Lwt_result.t) ref
-  val safe_lru : bool ref
   val allocate : from:[ `Root | `Load ] -> unit -> (sector Lru.elt, error) Lwt_result.t
   val unallocate : sector Lru.elt -> unit
 
@@ -187,6 +187,16 @@ let of_impl
     let allocator = ref (fun _ -> failwith "no allocator")
     let lru = Lru.make ()
     let safe_lru = ref true
+
+    let protect_lru fn =
+      assert !safe_lru ;
+      safe_lru := false ;
+      Lwt.map
+        (fun v ->
+          safe_lru := true ;
+          v)
+        (fn ())
+
     let available_cstructs = ref []
     let nb_available = ref 0
     let max_lru_size = 2048
@@ -366,12 +376,7 @@ let of_impl
         let make_room () =
           if (not !safe_lru) || Lru.length lru < max_lru_size
           then Lwt_result.return ()
-          else begin
-            assert !safe_lru ;
-            safe_lru := false ;
-            let+ () = lru_make_room [] in
-            safe_lru := true
-          end
+          else protect_lru (fun () -> lru_make_room [])
         in
         let+ () = make_room () in
         Lru.make_elt (sector ()) lru
