@@ -28,6 +28,7 @@ module Make (Check : Checksum.S) (Block : Mirage_block.S) : sig
 
   (* many are unnecessary, clean me up *)
   val flush : t -> (unit, write_error) Lwt_result.t
+  val clear : t -> (unit, write_error) Lwt_result.t
   val disk_space : t -> int64
   val free_space : t -> int64
   val page_size : t -> int

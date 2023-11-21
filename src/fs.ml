@@ -13,6 +13,7 @@ module type S = sig
   val format : unit -> t io
   val connect : unit -> t io
   val flush : t -> unit io
+  val clear : unit -> unit io
   val disk_space : t -> int64
   val free_space : t -> int64
   val page_size : t -> int
@@ -64,7 +65,8 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
     let* files = Files.load payload in
     let* free_queue = Queue.load free_queue in
     let* () = Files.verify_checksum files in
-    let+ () = Queue.verify_checksum free_queue in
+    let* () = Queue.verify_checksum free_queue in
+    let+ () = B.clear () in
     let lock = Lwt_mutex.create () in
     { root; files; free_queue; lock }
 
@@ -119,6 +121,7 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
 
   let connect () = Root.load ~check:of_root ()
   let with_lock t fn = Lwt_mutex.with_lock t.lock fn
+  let clear () = B.clear ()
 
   let flush t =
     with_lock t
@@ -126,26 +129,29 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
     B.protect_lru
     @@ fun () ->
     let* required = Files.count_new t.files in
-    if required = 0
-    then begin
-      assert (B.acquire_discarded () = []) ;
-      Lwt_result.return ()
-    end
-    else begin
-      let t_free_queue = t.free_queue in
-      let* free_queue = Queue.push_discarded t.free_queue in
-      let* free_queue, allocated = Queue.pop_front free_queue required in
-      assert (List.length allocated = required) ;
-      let* free_queue, to_flush_queue = Queue.self_allocate ~free_queue in
-      let* payload_root, to_flush, allocated = Files.to_payload t.files allocated in
-      assert (allocated = []) ;
-      let* () = Root.flush (List.rev_append to_flush_queue to_flush) in
-      let* free_queue = Root.update t.root ~queue:free_queue ~payload:payload_root in
-      assert (B.acquire_discarded () = []) ;
-      assert (t.free_queue == t_free_queue) ;
-      t.free_queue <- free_queue ;
-      check_size t
-    end
+    let* () =
+      if required = 0
+      then begin
+        assert (B.acquire_discarded () = []) ;
+        Lwt_result.return ()
+      end
+      else begin
+        let t_free_queue = t.free_queue in
+        let* free_queue = Queue.push_discarded t.free_queue in
+        let* free_queue, allocated = Queue.pop_front free_queue required in
+        assert (List.length allocated = required) ;
+        let* free_queue, to_flush_queue = Queue.self_allocate ~free_queue in
+        let* payload_root, to_flush, allocated = Files.to_payload t.files allocated in
+        assert (allocated = []) ;
+        let* () = Root.flush (List.rev_append to_flush_queue to_flush) in
+        let* free_queue = Root.update t.root ~queue:free_queue ~payload:payload_root in
+        assert (B.acquire_discarded () = []) ;
+        assert (t.free_queue == t_free_queue) ;
+        t.free_queue <- free_queue ;
+        check_size t
+      end
+    in
+    B.clear ()
 
   let filename t = Files.filename (fst t)
 
@@ -279,6 +285,7 @@ module Make_check (Check : CHECKSUM) (Block : Mirage_block.S) = struct
     T ((module S), t)
 
   let flush (T ((module S), t)) = or_fail S.pp_error "Notafs.flush" @@ S.flush t
+  let clear (T ((module S), _)) = or_fail S.pp_error "Notafs.clear" @@ S.clear ()
   let exists (T ((module S), t)) filename = S.exists t (split_filename filename)
 
   type file = File : (module S with type t = 'a and type file = 'b) * 'a * 'b -> file

@@ -51,6 +51,7 @@ module type A_DISK = sig
   val allocator : (int -> (Id.t list, error) Lwt_result.t) ref
   val allocate : from:[ `Root | `Load ] -> unit -> (sector Lru.elt, error) Lwt_result.t
   val unallocate : sector Lru.elt -> unit
+  val clear : unit -> (unit, error) Lwt_result.t
 
   val set_finalize
     :  sector
@@ -147,7 +148,7 @@ let of_impl
         | Error e -> Error (`Read e)
       in
       concurrent_reads := (page_id, (cstruct, set_done)) :: !concurrent_reads ;
-      let* () = Lwt.pause () in
+      (* let* () = Lwt.pause () in *)
       begin
         match !concurrent_reads with
         | [] -> is_done
@@ -155,7 +156,7 @@ let of_impl
           concurrent_reads := [] ;
           let groups = regroup to_read in
           let* () =
-            Lwt_list.iter_p
+            Lwt_list.iter_s
               (fun (page_id, cstructs_complete) ->
                 let cstructs = List.map fst cstructs_complete in
                 let page_id = Id.to_int64 page_id in
@@ -197,18 +198,11 @@ let of_impl
           v)
         (fn ())
 
-    let available_cstructs = ref []
     let nb_available = ref 0
     let max_lru_size = 2048
     let min_lru_size = max_lru_size / 2
-
-    let release_cstructs cstructs =
-      if !nb_available + Lru.length lru > max_lru_size
-      then ()
-      else begin
-        incr nb_available ;
-        available_cstructs := cstructs :: !available_cstructs
-      end
+    let available_cstructs = ref []
+    let release_cstructs cstructs = available_cstructs := cstructs :: !available_cstructs
 
     let unallocate elt =
       let t = Lru.value elt in
@@ -252,12 +246,38 @@ let of_impl
       | x :: xs, _ :: ys -> list_align_with (x :: acc) xs ys
       | _ -> assert false
 
+    let rec lru_clear () =
+      let open Lwt_result.Syntax in
+      match Lru.pop_back lru with
+      | None -> Lwt_result.return ()
+      | Some old ->
+        let* () =
+          match old.cstruct with
+          | Freed -> failwith "Cstruct.lru_make_room: Freed"
+          | On_disk _ -> Lwt_result.return ()
+          | Cstruct _cstruct -> begin
+            let* fin = old.finalize () in
+            match fin with
+            | Error page_id ->
+              release_cstructs [ _cstruct ] ;
+              old.cstruct <- On_disk page_id ;
+              Lwt_result.return ()
+            | Ok _ -> Lwt_result.return ()
+          end
+        in
+        lru_clear ()
+
+    let clear () =
+      let open Lwt_result.Syntax in
+      let+ () = lru_clear () in
+      available_cstructs := []
+
     let rec lru_make_room acc =
       let open Lwt_result.Syntax in
-      if Lru.length lru < min_lru_size
+      if (Lru.length lru < min_lru_size && !available_cstructs <> [])
          ||
          match Lru.peek_back lru with
-         | None -> assert false
+         | None -> true
          | Some e when e.finalize == no_finalizer -> true
          | _ -> false
       then begin
@@ -348,21 +368,17 @@ let of_impl
         in
         lru_make_room acc
 
-    let cstruct_reset c =
-      Cstruct.memset c 0xFF ;
-      c
-
     let cstruct_create () =
       match !available_cstructs with
       | [] -> Cstruct.create page_size
       | [ c ] :: css ->
         decr nb_available ;
         available_cstructs := css ;
-        cstruct_reset c
+        c
       | (c :: cs) :: css ->
         decr nb_available ;
         available_cstructs := cs :: css ;
-        cstruct_reset c
+        c
       | [] :: _ -> assert false
 
     let allocate ~from () =

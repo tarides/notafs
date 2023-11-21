@@ -74,6 +74,7 @@ module Make (Check : Checksum.S) (Block : Mirage_block.S) = struct
     T ((module S), t)
 
   let flush (T ((module S), t)) = lift_error @@ S.flush t
+  let clear (T ((module S), _)) = lift_error @@ S.clear ()
   let disk_space (T ((module S), t)) = S.disk_space t
   let free_space (T ((module S), t)) = S.free_space t
   let page_size (T ((module S), t)) = S.page_size t

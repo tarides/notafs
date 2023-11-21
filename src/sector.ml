@@ -210,24 +210,17 @@ module Make (B : Context.A_DISK) = struct
     | Root _ -> failwith "Sector.finalize_set_id: Root"
     | Freed -> failwith "Sector.finalize_set_id: Freed"
     | At page_id ->
-      let+ () =
+      let () =
         match t.parent with
-        | Detached -> Lwt_result.return ()
+        | Detached -> ()
         | Parent (parent, offset) ->
-          begin
-            try
-              let self = H.find parent.children offset in
-              assert (self == t)
-            with
-            | Not_found -> ()
-          end ;
-          let+ parent_cstruct = ro_cstruct parent in
-          let ptr = B.Id.read parent_cstruct offset in
-          assert (B.Id.equal ptr page_id) ;
-          let cs = read_checksum parent_cstruct offset in
-          assert (C.equal cs (Option.get t.checksum))
+          let active =
+            try H.find parent.children offset == t with
+            | Not_found -> false
+          in
+          if active && H.length t.children = 0 then H.remove parent.children offset
       in
-      Error page_id
+      Lwt_result.return @@ Error page_id
     | In_memory ->
       Lwt_result.return
       @@ Ok
@@ -246,6 +239,10 @@ module Make (B : Context.A_DISK) = struct
                      match H.find parent.children offset with
                      | exception Not_found -> failwith "trying to overwrite parent"
                      | child -> assert (child == t)
+                   end ;
+                   if H.length t.children = 0
+                   then begin
+                     H.remove parent.children offset
                    end ;
                    set_child_ptr parent offset (Disk (id, cs))
                end )
@@ -454,6 +451,7 @@ module Make (B : Context.A_DISK) = struct
     match t.id with
     | Freed -> invalid_arg "Sector.count_new: freed"
     | Root _ | At _ ->
+      if H.length t.children = 0 then assert (acc' = acc) ;
       if acc' = acc
       then Lwt_result.return acc'
       else begin
@@ -482,13 +480,14 @@ module Make (B : Context.A_DISK) = struct
   let rec finalize t ids acc =
     let* ids, acc = finalize_children t ids acc in
     let* cs =
-      match t.checksum with
-      | Some cs -> Lwt_result.return cs
-      | None ->
+      match t.id, t.checksum with
+      | _, Some cs -> Lwt_result.return cs
+      | In_memory, None ->
         let+ cstruct = ro_cstruct t in
         let cs = get_checksum cstruct in
         t.checksum <- Some cs ;
         cs
+      | _ -> failwith "finalize: missing checksum"
     in
     begin
       match t.id, ids with
@@ -521,20 +520,9 @@ module Make (B : Context.A_DISK) = struct
           match child.id with
           | Freed -> failwith "Sector.finalize: freed children"
           | Root id | At id ->
-            let prev_acc, prev_ids = acc, ids in
-            let prev_child_cs =
-              match child.checksum with
-              | Some cs -> cs
-              | None -> failwith "child has no checksum"
-            in
-            let+ child_id, child_cs, acc, ids = finalize child ids acc in
-            assert (id = child_id) ;
-            assert (acc == prev_acc) ;
-            assert (ids == prev_ids) ;
-            assert (C.equal child_cs prev_child_cs) ;
             B.set_id child.cstruct id ;
             H.remove t.children offset ;
-            ids, acc
+            Lwt_result.return (ids, acc)
           | In_memory ->
             let* child_id, child_cs, acc, ids = finalize child ids acc in
             assert (At child_id = child.id) ;
