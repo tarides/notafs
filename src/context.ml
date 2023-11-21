@@ -168,11 +168,17 @@ let of_impl
           v)
         (fn ())
 
-    let nb_available = ref 0
-    let max_lru_size = 2048
+    let max_lru_size = 1024
     let min_lru_size = max_lru_size / 2
     let available_cstructs = ref []
-    let release_cstructs cstructs = available_cstructs := cstructs :: !available_cstructs
+    let nb_available = ref 0
+
+    let release_cstructs cstructs =
+      if !nb_available < max_lru_size
+      then begin
+        nb_available := !nb_available + List.length cstructs ;
+        available_cstructs := List.rev_append cstructs !available_cstructs
+      end
 
     let unallocate elt =
       let t = Lru.value elt in
@@ -240,7 +246,8 @@ let of_impl
     let clear () =
       let open Lwt_result.Syntax in
       let+ () = lru_clear () in
-      available_cstructs := []
+      available_cstructs := [] ;
+      nb_available := 0
 
     let rec lru_make_room acc =
       let open Lwt_result.Syntax in
@@ -340,16 +347,13 @@ let of_impl
 
     let cstruct_create () =
       match !available_cstructs with
-      | [] -> Cstruct.create page_size
-      | [ c ] :: css ->
+      | [] ->
+        assert (!nb_available = 0) ;
+        Cstruct.create page_size
+      | c :: css ->
         decr nb_available ;
         available_cstructs := css ;
         c
-      | (c :: cs) :: css ->
-        decr nb_available ;
-        available_cstructs := cs :: css ;
-        c
-      | [] :: _ -> assert false
 
     let allocate ~from () =
       let sector () =
