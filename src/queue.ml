@@ -202,7 +202,7 @@ module Make (B : Context.A_DISK) = struct
             let+ () = if i > 0 then shift_left_children t i else Lwt_result.return () in
             acc, Ok_pop
           | Underflow rest ->
-            Sector.drop_release first ;
+            Sector.free first ;
             go (i + 1) rest acc
       in
       go 0 nb acc

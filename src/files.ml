@@ -52,7 +52,7 @@ module Make (B : Context.A_DISK) = struct
   let count_new t =
     let* files_count = count_new t.files in
     let+ on_disk_count =
-      if files_count = 0 && (not t.dirty) && (not !B.dirty) && false
+      if files_count = 0 && (not t.dirty) && false
       then Lwt_result.return 0
       else begin
         let str = string_of_raw (fake t.files) in

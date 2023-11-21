@@ -6,7 +6,8 @@ module Make (B : Context.A_DISK) = struct
       let hash = Hashtbl.hash
     end)
 
-  module C = B.C
+  module Id = B.Id
+  module Check = B.Check
 
   type id = B.Id.t
 
@@ -19,14 +20,14 @@ module Make (B : Context.A_DISK) = struct
     | Freed
 
   let[@warning "-32"] string_of_loc = function
-    | Root id -> "(Root " ^ B.Id.to_string id ^ ")"
-    | At id -> "(At " ^ B.Id.to_string id ^ ")"
+    | Root id -> "(Root " ^ Id.to_string id ^ ")"
+    | At id -> "(At " ^ Id.to_string id ^ ")"
     | In_memory -> "In_memory"
     | Freed -> "Freed"
 
   type t =
     { mutable id : loc
-    ; mutable checksum : C.t option
+    ; mutable checksum : Check.t option
     ; cstruct : B.sector Lru.elt
     ; children : t H.t
     ; mutable parent : parent
@@ -38,24 +39,25 @@ module Make (B : Context.A_DISK) = struct
     | Parent of t * int
 
   type ptr =
-    | Disk of id * C.t
+    | Disk of id * Check.t
     | Mem of t
 
-  let ptr_byte_size = B.Id.byte_size + C.byte_size
+  let id_size = Id.byte_size
+  let ptr_size = id_size + Check.byte_size
 
   let ptr_t : ptr Repr.t =
     Repr.map
-      (Repr.string_of (`Fixed ptr_byte_size))
+      (Repr.string_of (`Fixed ptr_size))
       (fun str ->
         let cstruct = Cstruct.of_string str in
-        let id = B.Id.read cstruct 0 in
-        let cs = B.C.read cstruct B.Id.byte_size in
+        let id = Id.read cstruct 0 in
+        let cs = Check.read cstruct Id.byte_size in
         Disk (id, cs))
       (function
        | Disk (id, cs) ->
-         let cstruct = Cstruct.create ptr_byte_size in
-         B.Id.write cstruct 0 id ;
-         B.C.write cstruct B.Id.byte_size cs ;
+         let cstruct = Cstruct.create ptr_size in
+         Id.write cstruct 0 id ;
+         Check.write cstruct Id.byte_size cs ;
          Cstruct.to_string cstruct
        | _ -> invalid_arg "Sector.ptr_t: serialize Mem")
 
@@ -67,45 +69,42 @@ module Make (B : Context.A_DISK) = struct
     | In_memory -> invalid_arg "Sector.to_ptr: not allocated"
     | Freed -> invalid_arg "Sector.to_ptr: freed"
 
-  let null_id = B.Id.of_int 0
-  let id_size = B.Id.byte_size
-  let null_cs = C.default
-  let cs_size = C.byte_size
-  let ptr_size = id_size + cs_size
-  let is_null_id id = B.Id.equal null_id id
+  let null_id = Id.of_int 0
+  let null_cs = Check.default
+  let is_null_id id = Id.equal null_id id
   let null_ptr = Disk (null_id, null_cs)
 
   let is_null_ptr = function
     | Disk (id, _) -> is_null_id id
     | Mem _ -> false
 
-  let get_checksum cstruct = C.digest cstruct
-  let set_checksum cstruct offset cs = C.write cstruct (offset + id_size) cs
-  let read_checksum cstruct offset = C.read cstruct (offset + id_size)
+  let get_checksum cstruct = Check.digest cstruct
+  let set_checksum cstruct offset cs = Check.write cstruct (offset + id_size) cs
+  let read_checksum cstruct offset = Check.read cstruct (offset + id_size)
 
   open Lwt_result.Syntax
 
   let ro_cstruct t = B.cstruct t.cstruct
-  let root_checksum_offset = B.page_size - C.byte_size
+  let root_checksum_offset = B.page_size - Check.byte_size
 
   let compute_root_checksum cstruct =
-    C.write cstruct root_checksum_offset C.default ;
-    C.digest cstruct
+    Check.write cstruct root_checksum_offset Check.default ;
+    Check.digest cstruct
 
-  let invalid_checksum id = Lwt_result.fail (`Invalid_checksum (B.Id.to_int64 id))
+  let invalid_checksum id = Lwt_result.fail (`Invalid_checksum (Id.to_int64 id))
 
   let check_root_checksum ~id cstruct =
     let* cstruct = B.cstruct cstruct in
-    let cs = C.read cstruct root_checksum_offset in
+    let cs = Check.read cstruct root_checksum_offset in
     let expected = compute_root_checksum cstruct in
-    if C.equal cs expected then Lwt_result.return () else invalid_checksum id
+    if Check.equal cs expected then Lwt_result.return () else invalid_checksum id
 
   let verify_checksum t =
     match t.id, t.checksum with
     | At id, Some cs ->
       let* cstruct = ro_cstruct t in
       let cs' = get_checksum cstruct in
-      if C.equal cs cs' then Lwt_result.return () else invalid_checksum id
+      if Check.equal cs cs' then Lwt_result.return () else invalid_checksum id
     | Root id, None -> check_root_checksum ~id t.cstruct
     | In_memory, None -> Lwt_result.return ()
     | _ -> assert false
@@ -272,7 +271,7 @@ module Make (B : Context.A_DISK) = struct
       assert (H.find parent.children offset == t) ;
       H.remove parent.children offset
 
-  let drop_release t =
+  let free t =
     assert (H.length t.children = 0) ;
     begin
       match t.id with
@@ -325,8 +324,6 @@ module Make (B : Context.A_DISK) = struct
         H.replace t.children j child ;
         child.parent <- Parent (t, j)
     done
-
-  let length _t = B.page_size
 
   let get_uint8 t offset =
     let+ cstruct = ro_cstruct t in
@@ -400,7 +397,6 @@ module Make (B : Context.A_DISK) = struct
       ; checksum = None
       }
     in
-    B.set_finalize (Lru.value cstruct) (fun _ -> failwith "finalize root") ;
     t
 
   let load = function
@@ -537,9 +533,7 @@ module Make (B : Context.A_DISK) = struct
     result
 
   let finalize t ids =
-    let* e = count_new t in
     let+ _, _, ts, ids' = finalize t ids [] in
-    assert (List.length ids' + e = List.length ids) ;
     ts, ids'
 
   let force_id t =
@@ -569,7 +563,7 @@ module Make (B : Context.A_DISK) = struct
     | Root id ->
       let* cstruct = B.cstruct t.cstruct in
       let cs = compute_root_checksum cstruct in
-      C.write cstruct root_checksum_offset cs ;
+      Check.write cstruct root_checksum_offset cs ;
       B.write id [ cstruct ]
     | _ -> failwith "Sector.write_root: not a generation"
 end

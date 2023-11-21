@@ -1,14 +1,11 @@
 module Make (B : Context.A_DISK) : sig
-  type id = B.Id.t
+  type 'a r := ('a, B.error) Lwt_result.t
+  type id = B.Id.t [@@deriving repr]
 
   val id_size : int
-  val id_t : id Repr.t
-  val null_id : id
-  val is_null_id : id -> bool
 
-  type ptr
+  type ptr [@@deriving repr]
 
-  val ptr_t : ptr Repr.t
   val null_ptr : ptr
   val is_null_ptr : ptr -> bool
   val ptr_size : int
@@ -19,15 +16,22 @@ module Make (B : Context.A_DISK) : sig
   val to_ptr : t -> ptr
 
   type loc
-  type 'a r := ('a, B.error) Lwt_result.t
 
   val root_loc : id -> loc
   val create : ?at:loc -> unit -> t r
   val load_root : ?check:bool -> id -> t r
   val load : ptr -> t r
+  val verify_checksum : t -> unit r
+
+  (* *)
   val write_root : t -> unit r
   val to_write : t -> (id * Cstruct.t) r
-  val length : t -> int
+  val count_new : t -> int r
+  val is_in_memory : t -> bool
+  val finalize : t -> id list -> ((id * Cstruct.t) list * id list) r
+  val free : t -> unit
+
+  (* *)
   val get_uint8 : t -> int -> int r
   val set_uint8 : t -> int -> int -> unit r
   val get_uint16 : t -> int -> int r
@@ -46,11 +50,4 @@ module Make (B : Context.A_DISK) : sig
   val detach_region : t -> off:int -> len:int -> unit r
   val blit_from_string : string -> int -> t -> int -> int -> unit r
   val blit_to_bytes : t -> int -> bytes -> int -> int -> unit r
-
-  (* *)
-  val count_new : t -> int r
-  val finalize : t -> id list -> ((id * Cstruct.t) list * id list) r
-  val verify_checksum : t -> unit r
-  val drop_release : t -> unit
-  val is_in_memory : t -> bool
 end

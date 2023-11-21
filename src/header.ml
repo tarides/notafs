@@ -129,8 +129,8 @@ end = struct
     let* () = set_page_size s page_size in
     let* () = set_roots s 4 in
     let* () = set_format_uid s format_uid in
-    let* () = s.@(checksum_byte_size) <- B.C.byte_size in
-    let+ () = s.@(checksum_algorithm) <- int64_of_string B.C.name in
+    let* () = s.@(checksum_byte_size) <- B.Check.byte_size in
+    let+ () = s.@(checksum_algorithm) <- int64_of_string B.Check.name in
     s
 
   let load_config () =
@@ -168,8 +168,8 @@ end = struct
       else Lwt_result.return ()
     in
     let* () =
-      if config.checksum_byte_size <> B.C.byte_size
-         || config.checksum_algorithm <> B.C.name
+      if config.checksum_byte_size <> B.Check.byte_size
+         || config.checksum_algorithm <> B.Check.name
       then
         Lwt_result.fail
           (`Wrong_checksum_algorithm

@@ -17,7 +17,7 @@ module Make (B : Context.A_DISK) = struct
   let child_size = key_size + Sector.ptr_size
   let key_index i = header_size + (child_size * i)
   let child_index i = key_index i + key_size
-  let max_children t = (Sector.length t - header_size) / child_size
+  let max_children = (B.page_size - header_size) / child_size
   let get_key t i = Sector.get_uint32 t (key_index i)
   let set_key t i v = Sector.set_uint32 t (key_index i) v
   let get_child t i = Sector.get_child t (child_index i)
@@ -30,7 +30,7 @@ module Make (B : Context.A_DISK) = struct
   module Leaf = struct
     type nonrec t = t
 
-    let max_length t = Sector.length t - header_size
+    let max_length = B.page_size - header_size
     let get_length = get_nb_children
     let set_length = set_nb_children
 
@@ -41,9 +41,8 @@ module Make (B : Context.A_DISK) = struct
       t
 
     let append t (str, i, str_len) =
-      let max_len = max_length t in
       let* len = get_length t in
-      let capacity = max_len - len in
+      let capacity = max_length - len in
       if capacity <= 0
       then Lwt_result.return (t, Rest i)
       else begin
@@ -133,7 +132,7 @@ module Make (B : Context.A_DISK) = struct
         Lwt_result.return (t, Ok)
       | Rest i' when i = i' ->
         (* no progress, child is full *)
-        if len >= max_children t
+        if len >= max_children
         then begin
           let* retry = compact t in
           if retry then do_append t (str, i, str_len) else Lwt_result.return (t, Rest i)
@@ -159,7 +158,7 @@ module Make (B : Context.A_DISK) = struct
     then Lwt_result.return false
     else begin
       let* len = get_nb_children t in
-      assert (len = max_children t) ;
+      assert (len = max_children) ;
       let last_index = len - 1 in
       let* last_child = get_child t last_index in
       let* child_height = get_height last_child in
@@ -355,7 +354,7 @@ module Make (B : Context.A_DISK) = struct
         go 0
       end
     in
-    Sector.drop_release t
+    Sector.free t
 
   let rec reachable_size t =
     let* height = get_height t in

@@ -12,9 +12,7 @@ end
 
 module type A_DISK = sig
   module Id : Id.S
-  module C : Checksum.S
-
-  val dirty : bool ref
+  module Check : Checksum.S
 
   type read_error
   type write_error
@@ -62,21 +60,19 @@ end
 let of_impl
   (type t e we)
   (module B : SIMPLE_DISK with type t = t and type error = e and type write_error = we)
-  (module C : Checksum.S)
+  (module Check : Checksum.S)
   (disk : t)
   =
   let open Lwt.Syntax in
   let+ info = B.get_info disk in
   (module struct
     module Id = (val Id.of_nb_pages info.size_sectors)
-    module C = C
+    module Check = Check
 
     type page =
       | Cstruct of Cstruct.t
       | On_disk of Id.t
       | Freed
-
-    let dirty = ref false
 
     type read_error = B.error
     type write_error = B.write_error
