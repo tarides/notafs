@@ -1,9 +1,6 @@
 open Lwt.Syntax
 
 module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
-  let min = 1_000
-  let max = 10_000_000
-  let step = 500_000
   let nb_run = 10
 
   let force lwt =
@@ -14,10 +11,14 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
     | Error _ -> failwith "error"
 
   let median sorted_l =
-    let len = List.length sorted_l in
-    if len mod 2 = 0
-    then (List.nth sorted_l (len / 2) + List.nth sorted_l ((len / 2) + 1)) / 2
-    else List.nth sorted_l ((len + 1) / 2)
+    match sorted_l with
+    | [] -> 0
+    | hd :: [] -> hd
+    | _ ->
+      let len = List.length sorted_l in
+      if len mod 2 = 0
+      then (List.nth sorted_l (len / 2) + List.nth sorted_l ((len / 2) + 1)) / 2
+      else List.nth sorted_l ((len + 1) / 2)
 
   let pp_perf acc n l =
     let l = List.sort compare l in
@@ -30,6 +31,8 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
 
     val connect : Block.t -> (t, error) result Lwt.t
     val format : Block.t -> (t, write_error) result Lwt.t
+    val pp_write_error : Format.formatter -> write_error -> unit
+    val pp_error : Format.formatter -> error -> unit
   end
 
   module Bench (Kv : Formatted_kv) = struct
@@ -37,16 +40,34 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
       let+ fs = force @@ Kv.format block in
       fs
 
-    let bench f =
+    let force pp lwt =
+      let open Lwt.Infix in
+      lwt
+      >|= function
+      | Ok v -> v
+      | Error e ->
+        Format.printf "%a@." pp e ;
+        failwith "error"
+
+    let bench pp f =
+      Gc.compact () ;
       let cl_start = Int64.to_int (Mclock.elapsed_ns ()) in
-      let+ _ = force @@ f (Mirage_kv.Key.v "foo") in
+      let+ _ = force pp @@ f (Mirage_kv.Key.v "foo") in
       let cl_stop = Int64.to_int (Mclock.elapsed_ns ()) in
       cl_stop - cl_start
 
     let bench_set fs file_size c =
-      bench (fun key -> Kv.set fs key (String.make file_size c))
+      bench Kv.pp_write_error (fun key -> Kv.set fs key (String.make file_size c))
 
-    let bench_get fs file_size = bench (fun key -> Kv.get fs key)
+    let bench_get fs file_size = bench Kv.pp_error (fun key -> Kv.get fs key)
+
+    let bench_get_partial fs file_size =
+      bench Kv.pp_error (fun key ->
+        Kv.get_partial
+          fs
+          key
+          ~offset:(Optint.Int63.of_int (file_size / 2))
+          ~length:(file_size / 4))
 
     let rec n_bench_set acc l n block file_size f =
       if n = 0
@@ -64,13 +85,16 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
       if n = 0
       then Lwt.return (acc, l)
       else
-        let* fs = force @@ Kv.connect block in
+        let* fs = force Kv.pp_error @@ Kv.connect block in
         let* time = f fs file_size in
         n_bench_get (acc + time) (time :: l) (n - 1) block file_size f
 
     let n_bench_get n block file_size f =
       let* fs = format block in
-      let* () = force @@ Kv.set fs (Mirage_kv.Key.v "foo") (String.make file_size 'g') in
+      let* () =
+        force Kv.pp_write_error
+        @@ Kv.set fs (Mirage_kv.Key.v "foo") (String.make file_size 'g')
+      in
       let* acc, l = n_bench_get 0 [] n block file_size f in
       Lwt.return (median (List.sort compare l))
 
@@ -86,7 +110,16 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
         let* mediane_get =
           n_bench_get nb_run block file_size (fun fs file_size -> bench_get fs file_size)
         in
-        Format.printf "%d\t%d\t%d@." file_size mediane_set mediane_get ;
+        let* mediane_get_partial =
+          n_bench_get nb_run block file_size (fun fs file_size ->
+            bench_get_partial fs file_size)
+        in
+        Format.printf
+          "%d\t%d\t%d\t%d@."
+          file_size
+          mediane_set
+          mediane_get
+          mediane_get_partial ;
         iterate block (List.tl file_size_l))
   end
 
@@ -108,7 +141,17 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
       let cl_stop = Int64.to_int (Mclock.elapsed_ns ()) in
       cl_stop - cl_start
 
-    let bench_get store name = bench (fun key -> Kv.get store key) name
+    let bench_get store _file_size name = bench (fun key -> Kv.get store key) name
+
+    let bench_get_partial store file_size name =
+      bench
+        (fun key ->
+          Kv.get_partial
+            store
+            key
+            ~offset:(Optint.Int63.of_int (file_size / 2))
+            ~length:(file_size / 4))
+        name
 
     let rec n_bench_get acc l n store f =
       if n = 0
@@ -128,9 +171,13 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
         let file_size = List.hd file_size_l in
         let* mediane_get =
           n_bench_get nb_run store (fun store ->
-            bench_get store (string_of_int file_size))
+            bench_get store file_size (string_of_int file_size))
         in
-        Format.printf "%d\t%d@." file_size mediane_get ;
+        let* mediane_get_partial =
+          n_bench_get nb_run store (fun store ->
+            bench_get_partial store file_size (string_of_int file_size))
+        in
+        Format.printf "%d\t%d\t%d@." file_size mediane_get mediane_get_partial ;
         iterate store (List.tl file_size_l))
   end
 
@@ -162,15 +209,19 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
   let init_fs_size_list min max step = List.rev (init_l [] min max step)
 
   let start block store =
-    let l1 = init_fs_size_list 1_000 100_000 5_000 in
-    let l2 = init_fs_size_list 1_000_000 10_000_000 500_000 in
-    let file_size_l = List.append l1 l2 in
+    let file_size_l =
+      init_fs_size_list 1_000 100_000 10_000
+      @ init_fs_size_list 100_000 1_000_000 100_000
+      @ init_fs_size_list 1_000_000 10_000_000 1_000_000
+      @ init_fs_size_list 10_000_000 100_000_000 20_000_000
+      @ init_fs_size_list 100_000_000 180_000_001 20_000_000
+    in
     Format.printf "#NOTAFS@." ;
     let* () = Bench_notaf.iterate block file_size_l in
     Format.printf "@.@.#TAR@." ;
     let* () = Bench_tar.iterate block file_size_l in
-    Format.printf "@.@.#DOCTEUR@." ;
-    let* () = Bench_doc.iterate store file_size_l in
+    (*Format.printf "@.@.#DOCTEUR@." ;
+      let* () = Bench_doc.iterate store file_size_l in*)
     let+ () = Block.disconnect block in
     ()
 end
