@@ -24,6 +24,7 @@ module type S = sig
   val filename : file -> string
   val size : file -> int io
   val exists : t -> key -> [> `Dictionary | `Value ] option
+  val last_modified : t -> key -> Ptime.t
   val append_substring : t -> file -> string -> off:int -> len:int -> unit io
   val blit_from_string : t -> file -> off:int -> len:int -> string -> unit io
   val blit_to_bytes : t -> file -> off:int -> len:int -> bytes -> int io
@@ -37,12 +38,13 @@ module type S = sig
   val set_partial : t -> key -> offset:Optint.Int63.t -> string -> bool io
 end
 
-module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
+module Make_disk (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) :
+  S with module Disk = B = struct
   module Disk = B
   module Sector = Sector.Make (B)
   module Root = Root.Make (B)
   module Queue = Queue.Make (B)
-  module Files = Files.Make (B)
+  module Files = Files.Make (Clock) (B)
   module Rope = Rope.Make (B)
 
   type error = B.error
@@ -170,6 +172,7 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
 
   let size (_, file) = Files.size file
   let exists t filename = Files.exists t.files filename
+  let last_modified t filename = Files.last_modified t.files filename
 
   let remove t filename =
     with_lock t
@@ -236,7 +239,11 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
       true
 end
 
-module Make_check (Check : CHECKSUM) (Block : Mirage_block.S) = struct
+module Make_check
+    (Clock : Mirage_clock.PCLOCK)
+    (Check : CHECKSUM)
+    (Block : Mirage_block.S) =
+struct
   let debug = false
 
   type error =
@@ -274,7 +281,7 @@ module Make_check (Check : CHECKSUM) (Block : Mirage_block.S) = struct
   let make_disk block =
     let open Lwt.Syntax in
     let+ (module A_disk) = Context.of_impl (module Block) (module Check) block in
-    Ok (module Make_disk (A_disk) : S)
+    Ok (module Make_disk (Clock) (A_disk) : S)
 
   exception Fs of error
 
@@ -309,7 +316,7 @@ module Make_check (Check : CHECKSUM) (Block : Mirage_block.S) = struct
 
   let connect block =
     let* (module A_disk) = Context.of_impl (module Block) (module Check) block in
-    let (module S) = (module Make_disk (A_disk) : S) in
+    let (module S) = (module Make_disk (Clock) (A_disk) : S) in
     or_fail S.pp_error "Notafs.connect"
     @@
     let open Lwt_result.Syntax in
@@ -319,6 +326,9 @@ module Make_check (Check : CHECKSUM) (Block : Mirage_block.S) = struct
   let flush (T ((module S), t)) = or_fail S.pp_error "Notafs.flush" @@ S.flush t
   let clear (T ((module S), _)) = or_fail S.pp_error "Notafs.clear" @@ S.clear ()
   let exists (T ((module S), t)) filename = S.exists t (split_filename filename)
+
+  let last_modified (T ((module S), t)) filename =
+    S.last_modified t (split_filename filename)
 
   type file = File : (module S with type t = 'a and type file = 'b) * 'a * 'b -> file
 

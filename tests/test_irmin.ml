@@ -5,7 +5,7 @@
 
 module B = Block_viz.Make (Block)
 
-module Clock = struct
+module Mclock = struct
   let elapsed_ns () = Mtime.Span.to_uint64_ns (Mtime_clock.elapsed ())
   let period_ns () = None
 end
@@ -31,7 +31,7 @@ module Schema = struct
 end
 
 module Store = struct
-  module Maker = Irmin_pack_notafs.Maker (Clock) (B) (Conf)
+  module Maker = Irmin_pack_notafs.Maker (Mclock) (Pclock) (B) (Conf)
   include Maker.Make (Schema)
 
   let config ?(readonly = false) ?(fresh = true) root =

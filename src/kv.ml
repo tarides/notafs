@@ -1,6 +1,7 @@
 open Lwt_result.Syntax
 
-module Make (Check : Checksum.S) (Block : Mirage_block.S) = struct
+module Make (Clock : Mirage_clock.PCLOCK) (Check : Checksum.S) (Block : Mirage_block.S) =
+struct
   type error =
     [ `Read of Block.error
     | `Write of Block.write_error
@@ -51,7 +52,7 @@ module Make (Check : Checksum.S) (Block : Mirage_block.S) = struct
   let make_disk block =
     let open Lwt.Syntax in
     let+ (module A_disk) = Context.of_impl (module Block) (module Check) block in
-    Ok (module Fs.Make_disk (A_disk) : S)
+    Ok (module Fs.Make_disk (Clock) (A_disk) : S)
 
   let format block =
     let open Lwt_result.Syntax in
@@ -76,6 +77,10 @@ module Make (Check : Checksum.S) (Block : Mirage_block.S) = struct
   let exists (T ((module S), t)) key =
     let filename = Mirage_kv.Key.segments key in
     Lwt.return_ok (S.exists t filename)
+
+  let last_modified (T ((module S), t)) key =
+    let filename = Mirage_kv.Key.segments key in
+    Lwt.return_ok (S.last_modified t filename)
 
   let get (T ((module S), t)) key =
     let filename = Mirage_kv.Key.segments key in
@@ -143,7 +148,6 @@ module Make (Check : Checksum.S) (Block : Mirage_block.S) = struct
     let* () = lift_error @@ S.rename t ~src ~dst in
     lift_error @@ S.flush t
 
-  let last_modified _ _ = Lwt_result.fail (`Unsupported_operation "last_modified")
   let digest _ _ = Lwt_result.fail (`Unsupported_operation "digest")
   let disconnect _ = Lwt.return_unit
 end

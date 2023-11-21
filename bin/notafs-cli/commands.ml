@@ -145,10 +145,10 @@ let copy disk path_from path_to =
 let stats disk path =
   let cat () =
     let key = Mirage_kv.Key.v path in
-    (* let* last_modified = Disk.last_modified disk key in *)
+    let* last_modified = Disk.last_modified disk key in
     let+ size = Disk.size disk key in
     Fmt.pr "Size: %a@." Optint.Int63.pp size ;
-    Fmt.pr "Last modified: %s@." "<Not Supported Yet>"
+    Fmt.pr "Last modified: %a@." (Ptime.pp_human ()) last_modified
   in
   on_error "stats" @@ Lwt_main.run (cat ())
 

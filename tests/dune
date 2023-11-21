@@ -8,6 +8,7 @@
   irmin
   irmin_pack_notafs
   mirage-block-unix
+  mirage-clock-unix
   mtime.clock.os
   block_viz))
 
@@ -26,10 +27,10 @@
  (name test_large_notafs)
  (modules test_large_notafs)
  (package notafs)
- (libraries lwt notafs mirage-block-unix mtime.clock.os))
+ (libraries lwt notafs mirage-block-unix mirage-clock-unix mtime.clock.os))
 
 (test
  (name test_fs)
  (modules test_fs)
  (package notafs)
- (libraries lwt notafs mirage-block-unix mtime.clock.os cmdliner))
+ (libraries lwt notafs mirage-block-unix mirage-clock-unix cmdliner))

@@ -7,7 +7,7 @@ module No_checksum : CHECKSUM
 module Adler32 : CHECKSUM
 
 (* KV *)
-module KV (Check : CHECKSUM) (Block : Mirage_block.S) : sig
+module KV (Clock : Mirage_clock.PCLOCK) (Check : CHECKSUM) (Block : Mirage_block.S) : sig
   type t
 
   type error =
@@ -38,7 +38,7 @@ module KV (Check : CHECKSUM) (Block : Mirage_block.S) : sig
 end
 
 (* FS *)
-module FS (Check : CHECKSUM) (Block : Mirage_block.S) : sig
+module FS (Clock : Mirage_clock.PCLOCK) (Check : CHECKSUM) (Block : Mirage_block.S) : sig
   type error =
     [ `All_generations_corrupted
     | `Disk_is_full

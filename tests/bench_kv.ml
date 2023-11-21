@@ -104,8 +104,8 @@ module Test (Kv : Mirage_kv.RW) = struct
     Lwt.return_unit
 end
 
-module Notafs_kv = Notafs.KV (Notafs.No_checksum) (Block)
-module Notafs_kv_crc = Notafs.KV (Notafs.Adler32) (Block)
+module Notafs_kv = Notafs.KV (Pclock) (Notafs.No_checksum) (Block)
+module Notafs_kv_crc = Notafs.KV (Pclock) (Notafs.Adler32) (Block)
 module Test_notafs = Test (Notafs_kv)
 module Test_notafs_crc = Test (Notafs_kv_crc)
 module Tar_kv = Tar_mirage.Make_KV_RW (Pclock) (Block)

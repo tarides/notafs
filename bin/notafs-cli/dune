@@ -3,4 +3,4 @@
  (public_name notafs-cli)
  (package notafs)
  (modules notafs_cli commands common_args context)
- (libraries notafs fmt fmt.tty cmdliner mirage-block-unix))
+ (libraries notafs fmt fmt.tty cmdliner mirage-block-unix mirage-clock-unix))

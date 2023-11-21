@@ -53,7 +53,7 @@ module Block = struct
 end
 
 module Test (Check : Notafs.CHECKSUM) = struct
-  module Fs = Notafs.FS (Check) (Block)
+  module Fs = Notafs.FS (Pclock) (Check) (Block)
   open Lwt.Syntax
 
   let filename = "myfile"

@@ -1,4 +1,7 @@
-module Make (Check : Checksum.S) (Block : Mirage_block.S) : sig
+module Make
+    (Clock : Mirage_clock.PCLOCK)
+    (Check : Checksum.S)
+    (Block : Mirage_block.S) : sig
   type t
 
   type error =

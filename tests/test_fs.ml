@@ -1,5 +1,5 @@
 open Cmdliner
-module Disk = Notafs.KV (Notafs.Adler32) (Block)
+module Disk = Notafs.KV (Pclock) (Notafs.Adler32) (Block)
 
 let on_error s = function
   | Ok () -> ()

@@ -1,7 +1,11 @@
 module Int63 = Optint.Int63
 
-module Make (Clock : Mirage_clock.MCLOCK) (B : Mirage_block.S) = struct
-  module Fs = Notafs.FS (Notafs.Adler32) (B)
+module Make
+    (Mclock : Mirage_clock.MCLOCK)
+    (Pclock : Mirage_clock.PCLOCK)
+    (B : Mirage_block.S) =
+struct
+  module Fs = Notafs.FS (Pclock) (Notafs.Adler32) (B)
 
   module IO = struct
     open Lwt.Syntax
@@ -215,17 +219,17 @@ module Make (Clock : Mirage_clock.MCLOCK) (B : Mirage_block.S) = struct
   module Clock = struct
     type counter = int64
 
-    let counter () = Clock.elapsed_ns ()
+    let counter () = Mclock.elapsed_ns ()
 
     let count t =
-      let now = Clock.elapsed_ns () in
+      let now = Mclock.elapsed_ns () in
       Mtime.Span.of_uint64_ns (Int64.sub now t)
 
     let start = counter ()
     let elapsed () = count start
 
     let now () =
-      let now = Clock.elapsed_ns () in
+      let now = Mclock.elapsed_ns () in
       Mtime.of_uint64_ns (Int64.sub now start)
   end
 
