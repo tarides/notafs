@@ -273,8 +273,6 @@ module Make_check (Check : CHECKSUM) (Block : Mirage_block.S) = struct
     let+ (t : S.t) = S.format () in
     T ((module S), t)
 
-  let stats (T ((module S), _)) = Stats.snapshot S.Disk.stats
-
   let connect block =
     let* (module A_disk) = Context.of_impl (module Block) (module Check) block in
     let (module S) = (module Make_disk (A_disk) : S) in

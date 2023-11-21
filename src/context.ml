@@ -14,7 +14,6 @@ module type A_DISK = sig
   module Id : Id.S
   module C : Checksum.S
 
-  val stats : Stats.t
   val dirty : bool ref
 
   type read_error
@@ -71,8 +70,6 @@ let of_impl
   (module struct
     module Id = (val Id.of_nb_pages info.size_sectors)
     module C = C
-
-    let stats = Stats.create ()
 
     type page =
       | Cstruct of Cstruct.t
@@ -160,7 +157,6 @@ let of_impl
               (fun (page_id, cstructs_complete) ->
                 let cstructs = List.map fst cstructs_complete in
                 let page_id = Id.to_int64 page_id in
-                Stats.incr_read stats (List.length cstructs) ;
                 let+ r = B.read disk page_id cstructs in
                 List.iter
                   (fun (_, set_done) -> Lwt.wakeup_later set_done r)
@@ -171,7 +167,6 @@ let of_impl
       end
 
     let write page_id cstructs =
-      Stats.incr_write stats (List.length cstructs) ;
       let page_id = Id.to_int64 page_id in
       let open Lwt.Syntax in
       let+ result = B.write disk page_id cstructs in

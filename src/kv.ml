@@ -175,5 +175,4 @@ module Make (Check : Checksum.S) (Block : Mirage_block.S) = struct
   let last_modified _ _ = Lwt_result.fail (`Unsupported_operation "last_modified")
   let digest _ _ = Lwt_result.fail (`Unsupported_operation "digest")
   let disconnect _ = Lwt.return_unit
-  let stats (T ((module S), _)) = Stats.snapshot S.Disk.stats
 end

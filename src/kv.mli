@@ -32,5 +32,4 @@ module Make (Check : Checksum.S) (Block : Mirage_block.S) : sig
   val disk_space : t -> int64
   val free_space : t -> int64
   val page_size : t -> int
-  val stats : t -> Stats.ro
 end
