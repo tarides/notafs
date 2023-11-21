@@ -1,27 +1,27 @@
-# Notafs
+**:warning: Experimental! Do not use if you can't afford to loose data! :warning:**
 
-**:warning: This is an incomplete work-in-progress, bugs are expected: Do not use it if you can't afford to loose data.**
+Notafs is a pseudo filesystem for Mirage block devices. It can handle a small number of large files. While the limited number of filenames is unsatisfying for general usage, it can be used to run the [`irmin-pack` backend of Irmin](https://mirage.github.io/irmin/irmin-pack/) which only requires a dozen of very large files. By running Irmin, one gets for free a filesystem-on-steroid for MirageOS: it supports an arbitrary large number of filenames; is optimized for small and large file contents; performs files deduplication; includes a git-like history with branching and merging, ... and it even provides a garbage collector to avoid running out of disk space (by deleting older commits). Since the Irmin filesystem is versioned by merkle hashes, one can imagine deploying [reproducible unikernels](https://robur.coop/Projects/Reproducible_builds) on reproducible filesystem states!
 
-Notafs is a library allowing the creation of copy-on-write filesystems running on Mirage block devices. At its core, it provides a glorified memory allocator to allocate and release pages of the disk in a safe way. Some nice properties are derived from there:
+At its core, Notafs provides a memory allocator for disk pages allowing copy-on-write everywhere in a safe way. Some nice properties are derived from there:
 
-- **Fail-safe:** Imperative updates are transparently written to new pages of the disk, rather than mutating the existing sectors in place. This guarantees that previous versions of the filesystem are always recoverable if anything goes wrong -- typically caused by a harsh power-off, with disk writes not completing and/or creating corrupted sectors. During boot, the latest filesystem is checksummed to validate its coherency -- if not, a previous valid version is used.
-- **Transactional semantics:** Since updates generate a shallow copy of the new filesystem (like a purely functional datastructure), one can reveal a large set of changes at once by comitting the freshly created copy. This permits updating multiple files and doing complex mutations involving several operations in a way that appears atomic (either all changes are visible at the same time, or none are).
-- **Relatively efficient:** A number of optimizations are running behind the scene, including dynamic sector pointer sizes (which uses less space on smaller disks), batching reads and writes of consecutive sectors, and flushing writes to disk early to avoid blowing up memory when one is performing a large update... but more is coming!
+- **Fail-safe:** All updates are written to new pages of the disk, rather than mutating existing sectors in place. This guarantees that previous versions of the filesystem are always recoverable -- typically in case of a harsh power-off, with disk writes not completing and/or creating corrupted sectors. During boot, the latest filesystem is checksummed to validate its coherency -- if not, a previous valid version of the files is used.
+- **Transactional semantics:** Since updates generate a shallow copy of the new filesystem (like a purely functional datastructure), one can reveal a large set of changes at once by persisting the freshly created copy. This permits updating multiple files and doing complex mutations involving several operations in a way that appears atomic (either all changes are visible, or none are).
+- **Relatively efficient:** A number of optimizations are running behind the scene, including dynamic sector pointer sizes (to use less space on smaller disks), batching writes of consecutive sectors, and flushing writes to disk early to avoid blowing up memory when performing a large update.
 
-As a work-in-progress demo, `notafs` includes a partial implementation of the [`mirage-kv`](https://ocaml.org/p/mirage-kv) interface. It supports large file contents represented by append-optimized ropes, but it is limited to a small numbers of filenames (!). While this is unsatisfying for general usage, this minimal filesystem is enough to run the [`irmin-pack` backend of Irmin](https://mirage.github.io/irmin/irmin-pack/), since it only requires a dozen of very large files. By running Irmin, one gets for free a filesystem-on-steroid for MirageOS: it supports an arbitrary number of filenames, is optimized for large and small file contents, has git-like history and branching and merging, ... and even provides a garbage collector to avoid running out of disk space (by deleting older commits). Since the Irmin filesystem is versionned by merkle hashes of its contents, one can imagine deploying [reproducible unikernels](https://robur.coop/Projects/Reproducible_builds) on reproducible filesystem states!
+As a work-in-progress demo, `notafs` includes a partial implementation of the [`mirage-kv`](https://ocaml.org/p/mirage-kv) interface. It supports large file contents represented by append-optimized B-tree ropes, but it is not optimized for a large number of filenames (no hard limit though). Benchmarks on `solo5-hvt` with a 2gb disk with 4kb sectors (512b for fat/docteur), and 1gb of available ram, with different filesystems failing sooner or later depending on their use of memory:
 
-The tests include a visualization of Irmin running on a Mirage block device, performing commits and garbage collection. Each 1kb sector is represented by a 32x32 pixel square (colored pages contain live data, grey ones are free). Epilepsy warning: this recording of the test below contains flashing lights.
+![benchmark `set/get/get_partial` on large files](https://art-w.github.io/notafs/bench.png)
 
-https://github.com/art-w/notafs/assets/4807590/5bff0478-0b94-4bcb-a5fc-7cc6fcb57531
+## Unikernel demos
 
-To run the unikernel demos, you'll need to pin the `notafs` library, copy the `unikernel-kv` folder out of the project (to avoid recursive issues with `opam-monorepo`), compile for your prefered target and create a disk to use:
+To run the unikernel demos, you'll need to pin the `notafs` library, copy the `unikernel-kv` folder out of the project (to avoid recursive issues with `opam-monorepo`), compile it for your prefered Mirage target and create a disk to use:
 
 ```shell
 # Pin the library
 $ cd notafs
-notafs/ $ opam pin . --with-version=dev
+notafs/ $ opam pin add notafs . --with-version=dev
 
-# Copy the demos to another folder
+# Copy the mirage-kv demo to another folder
 notafs/ $ cp -r unikernel-kv ../unikernel-kv
 notafs/ $ cd ../unikernel-kv
 
@@ -30,88 +30,96 @@ unikernel-kv/ $ mirage config -t hvt
 unikernel-kv/ $ make depends
 unikernel-kv/ $ make build
 
-# Create a disk
-$ dd if=/dev/zero of=/tmp/storage count=400
+# Create an empty disk
+$ truncate -s 400K /tmp/storage
 
 # And run!
 unikernel-kv/ $ solo5-hvt --block:storage=/tmp/storage -- ./dist/block_test.hvt
 ```
 
-The Irmin demo relies on OCaml 5 support for algebraic effects: While the `irmin-pack` backend abstracts its IO syscalls behind a direct-style API, interacting with Mirage block devices is done through Lwt. To bridge this gap, the small `lwt_direct` library hides Lwt operation behind a direct-style interface usable by `irmin-pack` (it plays a similar purpose to `lwt_eio` without a unix dependency). Perhaps surprisingly, this indirection trick doesn't work well when Irmin itself uses Lwt internally -- so the Eio fork of `irmin-pack` is used instead with the `eio.mock` handler. Note that [OCaml 5 support in solo5 is still experimental](https://github.com/mirage/ocaml-solo5/pull/124):
+The integration with Irmin relies on OCaml 5 support for algebraic effects: While the `irmin-pack` backend abstracts its IO syscalls behind a direct-style API, interacting with Mirage block devices is done through Lwt. To bridge this gap, the small `lwt_direct` library hides Lwt operation behind a direct-style interface usable by `irmin-pack` (it plays a similar purpose to [`lwt_eio`](https://github.com/ocaml-multicore/lwt_eio) without a unix dependency). Perhaps surprisingly, this indirection trick doesn't work well when Irmin itself uses Lwt internally -- so the experimental Eio fork of `irmin-pack` is used instead (with the `eio.mock` handler). Note that [OCaml 5 support in solo5 is also experimental](https://github.com/mirage/ocaml-solo5/pull/124):
 
 ```shell
 $ opam switch 5.0.0
 
 # Enable experimental support for OCaml 5 on solo5:
 $ opam pin https://github.com/mirage/ocaml-solo5.git#500-cleaned
+
+notafs/ $ opam pin . --with-version=dev
 ```
+
+The Irmin unikernel demo on solo5 can be run by following the same steps as for the mirage-kv one above.
+
+The tests include a visualization of Irmin running on a Mirage block device, performing commits and garbage collection. Each 1kb sector is represented by a 32x32 pixel square (colored pages contain live data, grey crossed ones are free). Epilepsy warning: the slowed recording of the test below contains flashing lights.
+
+```
+# Run the test with a graphic visualization of blocks operations:
+notafs/ $ truncate -s 200K /tmp/notafs-irmin
+notafs/ $ dune exec -- ./tests/test_irmin.exe   # --help for options
+```
+
+https://github.com/art-w/notafs/assets/4807590/5bff0478-0b94-4bcb-a5fc-7cc6fcb57531
 
 ## Notafs-CLI
 
-The notafs project has a CLI meant to ease up the creation and setup of notafs disks using the mirage-kv interface, making them easily accesible from within a unikernel.
-
-In order to use the CLI, first install the package and create a disk:
+A command-line tool is available to facilitate the creation of a disk usable with the `mirage-kv` interface:
 
 ```shell
-# Pin the library
-$ cd notafs
-notafs/ $ opam pin . --with-version=dev
+# Install the executable
+notafs/ $ opam pin add notafs-cli . --with-version=dev
 
-# Create a disk
-$ dd if=/dev/zero of=/tmp/storage count=400
+# Create an empty disk
+$ truncate -s 400K /tmp/storage
 ```
 
-Now that you have a disk, you will need to format it: It is a mandatory step, otherwise the other functions will raise an error and disk will be unusable:
+Before we can use it, the freshly created disk needs to be formatted. The flag `-p` represents the size of the sectors (512, 1024, 4096). It is optional and set to 512 by default.
 
 ```shell
-# Format the disk
-notafs/ $ notafs-cli format -d/tmp/storage -p4096
+# Format a disk
+$ notafs-cli format -d/tmp/storage -p4096
+
+# Display general informations about a formatted disk:
+$ notafs-cli info /tmp/storage
 ```
 
-The flag `-p` represents the size of the pages of your disk. It is optional and set at 512 by default.
-
-With a formatted disk, you can fill-in your disk with the following commands:
+To copy local files into the disk and extract them afterward: (paths on the disk have to be prefixed with the character `@` when using the `copy` operation)
 
 ```shell
-# Touch a file named 'foo'
-notafs/ $ notafs-cli touch -d/tmp/storage foo
+# Copy a local file `foo` into the disk as `dir/foo`:
+$ notafs-cli copy -d/tmp/storage foo @dir/foo
 
-# Rename it to 'bar':
-notafs/ $ notafs-cli rename -d/tmp/storage foo bar
-
-# Remove it:
-notafs/ $ notafs-cli remove -d/tmp/storage bar
-```
-
-Those default commands are usefull but copying local files into the disk and extract them afterward can be even more useful:
-**:warning: paths of the disk have to be prefixed with the character '@' when using the function `copy`**
-
-```shell
-# Copy a local file `foo` into the disk as `files/foo`:
-notafs/ $ notafs-cli copy -d/tmp/storage foo @file/foo
-
-# Duplicate a disk file `file/foo` as `bar`:
-notafs/ $ notafs-cli copy -d/tmp/storage @file/foo @bar
+# Duplicate a disk file `dir/foo` as `bar`:
+$ notafs-cli copy -d/tmp/storage @dir/foo @bar
 
 # Extract a disk file `bar` and name it `goo`:
-notafs/ $ notafs-cli copy -d/tmp/storage @bar goo
+$ notafs-cli copy -d/tmp/storage @bar goo
+
+# Dump a file `bar` from the disk into the standard output:
+$ notafs-cli cat -d/tmp/storage bar
 ```
 
-Lastly those functions will help you have a better understanding of the content of the disk and it's files:
+To list the contents and metadatas of files:
 
 ```shell
-# Dump general informations on the disk into the standard output:
-notafs/ $ notafs-cli info /tmp/storage
-
-# Dump a file `foo` from the disk into the standard output:
-notafs/ $ notafs-cli cat -d/tmp/storage foo
-
-# Get the size and last modified date (date not supported yet) of a file `foo`:
+# Get the size of a file `foo`:
 notafs/ $ notafs-cli stats -d/tmp/storage foo
 
-# List all the files/subdirectories of the folder `files`:
-notafs/ $ notafs-cli list -d/tmp/storage files
+# List all the files/subdirectories of the folder `dir`:
+notafs/ $ notafs-cli list -d/tmp/storage dir
 
-# Recursive list of all the files/subdirectories of the folder `files` in the form of a tree:
-notafs/ $ notafs-cli tree -d/tmp/storage files
+# Recursively list all the files/directories of the folder `dir`:
+notafs/ $ notafs-cli tree -d/tmp/storage dir
+```
+
+And to perform maintenance operations:
+
+```shell
+# Create an empty file named 'foo'
+$ notafs-cli touch -d/tmp/storage foo
+
+# Rename file 'foo' to 'bar':
+$ notafs-cli rename -d/tmp/storage foo bar
+
+# Remove the 'bar' file:
+$ notafs-cli remove -d/tmp/storage bar
 ```
