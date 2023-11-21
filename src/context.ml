@@ -120,7 +120,6 @@ let of_impl
     let header_size = 1
     let page_size = info.sector_size
     let nb_sectors = info.size_sectors
-    let concurrent_reads = ref []
 
     let rec regroup (first, last, cs, acc) = function
       | [] -> List.rev ((first, List.rev cs) :: acc)
@@ -137,34 +136,10 @@ let of_impl
       regroup @@ List.sort (fun (a_id, _) (b_id, _) -> Id.compare a_id b_id) lst
 
     let read page_id cstruct =
-      let is_done, set_done = Lwt.wait () in
-      let is_done =
-        let+ r = is_done in
-        match r with
-        | Ok () -> Ok ()
-        | Error e -> Error (`Read e)
-      in
-      concurrent_reads := (page_id, (cstruct, set_done)) :: !concurrent_reads ;
-      (* let* () = Lwt.pause () in *)
-      begin
-        match !concurrent_reads with
-        | [] -> is_done
-        | to_read ->
-          concurrent_reads := [] ;
-          let groups = regroup to_read in
-          let* () =
-            Lwt_list.iter_s
-              (fun (page_id, cstructs_complete) ->
-                let cstructs = List.map fst cstructs_complete in
-                let page_id = Id.to_int64 page_id in
-                let+ r = B.read disk page_id cstructs in
-                List.iter
-                  (fun (_, set_done) -> Lwt.wakeup_later set_done r)
-                  cstructs_complete)
-              groups
-          in
-          is_done
-      end
+      let page_id = Id.to_int64 page_id in
+      let open Lwt.Syntax in
+      let+ r = B.read disk page_id [ cstruct ] in
+      Result.map_error (fun e -> `Read e) r
 
     let write page_id cstructs =
       let page_id = Id.to_int64 page_id in
