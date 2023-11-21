@@ -29,10 +29,14 @@ let string_of_disk_space space =
 
 let info_cmd block =
   let infos () =
-    let+ config = Notafs.metadatas (module Block) block in
+    let+ config = Notafs.get_config (module Block) block in
     let disk_size = Int64.mul config.disk_size (Int64.of_int config.page_size) in
-    Fmt.pr "Disk space: %s@." (string_of_disk_space disk_size) ;
     Fmt.pr "Sector size: %s@." (string_of_disk_space @@ Int64.of_int config.page_size) ;
+    Fmt.pr
+      "Disk space: %s (%a sectors)@."
+      (string_of_disk_space disk_size)
+      Fmt.int64
+      config.disk_size ;
     Fmt.pr
       "Checksum: %s with %i bits@."
       config.checksum_algorithm

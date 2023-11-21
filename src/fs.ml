@@ -1,7 +1,6 @@
 open Lwt_result.Syntax
 
-module type DISK = Context.DISK
-module type CHECKSUM = Context.CHECKSUM
+module type CHECKSUM = Checksum.S
 
 module type S = sig
   module Disk : Context.A_DISK
@@ -12,7 +11,7 @@ module type S = sig
 
   val pp_error : Format.formatter -> error -> unit
   val format : unit -> t io
-  val of_block : unit -> t io
+  val connect : unit -> t io
   val flush : t -> unit io
   val disk_space : t -> int64
   val free_space : t -> int64
@@ -29,7 +28,6 @@ module type S = sig
   val blit_to_bytes : t -> file -> off:int -> len:int -> bytes -> int io
   val rename : t -> src:key -> dst:key -> unit io
   val touch : t -> key -> string -> file io
-  val replace : t -> key -> string -> unit io
   val remove : t -> key -> unit io
   val find_opt : t -> key -> file option
   val list : t -> key -> (string * [ `Value | `Dictionary ]) list
@@ -119,7 +117,7 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
     let* root = Root.format () in
     of_root root
 
-  let of_block () = Root.load ~check:of_root ()
+  let connect () = Root.load ~check:of_root ()
   let with_lock t fn = Lwt_mutex.with_lock t.lock fn
 
   let flush t =
@@ -148,7 +146,6 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
           assert (B.acquire_discarded () = []) ;
           assert (t.free_queue == t_free_queue) ;
           t.free_queue <- free_queue ;
-          B.flush () ;
           check_size t
         end
       end
@@ -189,15 +186,6 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
     t.files <- files ;
     filename, r
 
-  let replace t filename str =
-    with_lock t
-    @@ fun () ->
-    assert (Option.is_some @@ exists t filename) ;
-    let prev = Files.find t.files filename in
-    let* () = Rope.free !prev in
-    let+ rope = Rope.of_string str in
-    prev := rope
-
   let blit_to_bytes t filename ~off ~len bytes =
     with_lock t @@ fun () -> Files.blit_to_bytes filename ~off ~len bytes
 
@@ -214,7 +202,7 @@ module Make_disk (B : Context.A_DISK) : S with module Disk = B = struct
   let list t prefix = Files.list t.files prefix
 end
 
-module Make_check (Check : CHECKSUM) (Block : DISK) = struct
+module Make_check (Check : CHECKSUM) (Block : Mirage_block.S) = struct
   let debug = false
 
   type error =
@@ -287,13 +275,13 @@ module Make_check (Check : CHECKSUM) (Block : DISK) = struct
 
   let stats (T ((module S), _)) = Stats.snapshot S.Disk.stats
 
-  let of_block block =
+  let connect block =
     let* (module A_disk) = Context.of_impl (module Block) (module Check) block in
     let (module S) = (module Make_disk (A_disk) : S) in
-    or_fail S.pp_error "Notafs.of_block"
+    or_fail S.pp_error "Notafs.connect"
     @@
     let open Lwt_result.Syntax in
-    let+ (t : S.t) = S.of_block () in
+    let+ (t : S.t) = S.connect () in
     T ((module S), t)
 
   let flush (T ((module S), t)) = or_fail S.pp_error "Notafs.flush" @@ S.flush t
@@ -310,9 +298,6 @@ module Make_check (Check : CHECKSUM) (Block : DISK) = struct
 
   let remove (T ((module S), t)) filename =
     or_fail S.pp_error "Notafs.remove" @@ S.remove t (split_filename filename)
-
-  let replace (T ((module S), t)) filename contents =
-    or_fail S.pp_error "Notafs.replace" @@ S.replace t (split_filename filename) contents
 
   let touch (T ((module S), t)) filename contents =
     or_fail S.pp_error "Notafs.touch"
@@ -348,34 +333,11 @@ module Make_check (Check : CHECKSUM) (Block : DISK) = struct
     r
 end
 
-module No_checksum = struct
-  type t = unit
-
-  let name = "NO-CHECK"
-  let equal = ( = )
-  let default = ()
-  let digest_bigstring _ _ _ _ = ()
-  let to_int32 _ = Int32.zero
-  let of_int32 _ = ()
-  let byte_size = 0
-  let read _ _ = ()
-  let write _ _ _ = ()
-end
-
-module Adler32 = struct
-  include Checkseum.Adler32
-
-  let name = "ADLER-32"
-  let byte_size = 4
-  let read cstruct offset = of_int32 @@ Cstruct.HE.get_uint32 cstruct offset
-  let write cstruct offset v = Cstruct.HE.set_uint32 cstruct offset (to_int32 v)
-end
-
-module Make (B : DISK) = Make_check (Adler32) (B)
-
-let metadatas (type a) (module Block : DISK with type t = a) (block : a) =
+let get_config (type a) (module Block : Mirage_block.S with type t = a) (block : a) =
   let open Lwt.Syntax in
-  let* (module A_disk) = Context.of_impl (module Block) (module No_checksum) block in
+  let* (module A_disk) =
+    Context.of_impl (module Block) (module Checksum.No_checksum) block
+  in
   let (module H) =
     (module Header.Make (A_disk) : Header.CONFIG with type error = A_disk.error)
   in

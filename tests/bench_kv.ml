@@ -35,8 +35,6 @@ let input_contents =
 module Block = struct
   include Block
 
-  let discard _ _ = ()
-  let flush _ = ()
   let nb_writes = ref 0
   let sectors_written = ref 0
 
@@ -124,21 +122,21 @@ let main () =
     let* fs = no_error Notafs_kv.pp_error @@ Notafs_kv.format block in
     Format.printf "@.--- Notafs without checksum:@." ;
     let* () = Test_notafs.main fs in
-    Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Notafs_kv.stats fs) ;
+    (* Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Notafs_kv.stats fs) ; *)
     Lwt.return ()
   in
   let* () =
     let* fs = no_error Notafs_kv.pp_error @@ Notafs_kv.connect block in
     Format.printf "@.--- Notafs without checksum with existing contents:@." ;
     let* () = Test_notafs.main fs in
-    Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Notafs_kv.stats fs) ;
+    (* Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Notafs_kv.stats fs) ; *)
     Lwt.return ()
   in
   let* () =
     let* fs = no_error Notafs_kv_crc.pp_error @@ Notafs_kv_crc.format block in
     Format.printf "@.--- Notafs with checksum:@." ;
     let* () = Test_notafs_crc.main fs in
-    Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Notafs_kv_crc.stats fs) ;
+    (* Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Notafs_kv_crc.stats fs) ; *)
     Lwt.return ()
   in
   let* () = reset block in

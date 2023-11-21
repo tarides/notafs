@@ -1,7 +1,6 @@
 open Lwt_result.Syntax
-open Main
 
-module Make (Check : CHECKSUM) (Block : DISK) = struct
+module Make (Check : Checksum.S) (Block : Mirage_block.S) = struct
   type error =
     [ `Read of Block.error
     | `Write of Block.write_error
@@ -51,7 +50,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
       Error (`Wrong_checksum_algorithm (name, byte_size))
 
   module type S =
-    Main.S
+    Fs.S
       with type Disk.read_error = Block.error
        and type Disk.write_error = Block.write_error
 
@@ -60,7 +59,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
   let make_disk block =
     let open Lwt.Syntax in
     let+ (module A_disk) = Context.of_impl (module Block) (module Check) block in
-    Ok (module Make_disk (A_disk) : S)
+    Ok (module Fs.Make_disk (A_disk) : S)
 
   let format block =
     let open Lwt_result.Syntax in
@@ -71,7 +70,7 @@ module Make (Check : CHECKSUM) (Block : DISK) = struct
   let connect block =
     let open Lwt_result.Syntax in
     let* (module S) = make_disk block in
-    let+ (t : S.t) = lift_error @@ S.of_block () in
+    let+ (t : S.t) = lift_error @@ S.connect () in
     T ((module S), t)
 
   let flush (T ((module S), t)) = lift_error @@ S.flush t

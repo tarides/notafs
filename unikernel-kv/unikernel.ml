@@ -1,13 +1,6 @@
 open Lwt.Syntax
 
 module Main (Block : Mirage_block.S) = struct
-  module Block = struct
-    include Block
-
-    let discard _ _ = ()
-    let flush _ = ()
-  end
-
   module Kv = Notafs.KV (Notafs.No_checksum) (Block)
 
   let force lwt =

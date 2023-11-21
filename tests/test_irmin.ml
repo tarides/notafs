@@ -55,7 +55,7 @@ let main ~fresh ~factor ~stress () =
     let open Lwt.Syntax in
     assert (not !is_connected) ;
     let* r = Block.connect ~prefered_sector_size:(Some 1024) path in
-    let+ r = B.of_block r ~factor in
+    let+ r = B.connect r ~factor in
     is_connected := true ;
     r
   in

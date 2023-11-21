@@ -1,19 +1,13 @@
-(* stats *)
-module Stats = Stats
+(* checksum *)
+module type CHECKSUM = Checksum.S
 
-(* interfaces *)
+module No_checksum = Checksum.No_checksum
+module Adler32 = Checksum.Adler32
 
-module type DISK = Main.DISK
-module type CHECKSUM = Main.CHECKSUM
-
-(* default checkseum impl *)
-module No_checksum = Main.No_checksum
-module Adler32 = Main.Adler32
-
-(* main functors *)
-module Make_disk = Main.Make_disk
-module Make_check = Main.Make_check
-module Make = Main.Make
+(* mirage_kv filesystem *)
 module KV = Kv.Make
 
-let metadatas = Main.metadatas
+(* lower level filesystem *)
+module FS = Fs.Make_check
+
+let get_config = Fs.get_config

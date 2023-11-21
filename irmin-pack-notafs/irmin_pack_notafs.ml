@@ -1,6 +1,6 @@
 module Maker
     (Clock : Mirage_clock.MCLOCK)
-    (Block : Notafs.DISK)
+    (Block : Mirage_block.S)
     (Config : Irmin_pack.Conf.S) =
 struct
   module Io = Io.Make (Clock) (Block)

@@ -1,12 +1,4 @@
 open Cmdliner
-
-module Block = struct
-  include Block
-
-  let discard _ _ = ()
-  let flush _ = ()
-end
-
 module Disk = Notafs.KV (Notafs.Adler32) (Block)
 
 let on_error s = function
@@ -14,8 +6,6 @@ let on_error s = function
   | Error err -> Fmt.pr "Encountered error in %S: %a@." s Disk.pp_error err
 
 let prefered_sector_size = Some 1024
-
-(* let value = Int.to_string (Random.int 10000) *)
 
 let rec make_tree n acc =
   match n with
@@ -36,16 +26,17 @@ let make_tree n = make_tree n []
 let fs_tests disk =
   let tree = make_tree 7 in
   Fmt.pr "Tree:@.%a@." Fmt.Dump.(list @@ pair Mirage_kv.Key.pp string) tree ;
-  let open Lwt.Syntax in
-  let* _ = Lwt_list.map_s (fun (k, v) -> Disk.set disk k v) tree in
-  Lwt_result.return ()
+  let r = List.map (fun (k, v) -> Disk.set disk k v) tree in
+  List.fold_left (fun a b -> Lwt_result.bind a (fun () -> b)) (Lwt_result.return ()) r
 
 let main disk_path =
   let open Lwt_result.Syntax in
   let* block = Lwt_result.ok (Block.connect ~prefered_sector_size disk_path) in
   let* disk = Disk.format block in
   let* () = fs_tests disk in
-  Lwt_result.ok (Disk.disconnect disk)
+  let* _disk = Disk.connect block in
+  let* () = Lwt_result.ok (Disk.disconnect disk) in
+  Lwt_result.ok (Block.disconnect block)
 
 let main disk_path =
   Random.self_init () ;

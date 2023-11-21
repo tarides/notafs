@@ -1,4 +1,4 @@
-module Make (Check : Main.CHECKSUM) (Block : Main.DISK) : sig
+module Make (Check : Checksum.S) (Block : Mirage_block.S) : sig
   type t
 
   type error =

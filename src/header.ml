@@ -3,7 +3,6 @@ type config =
   ; page_size : int
   ; checksum_algorithm : string
   ; checksum_byte_size : int
-  ; format_uid : Int64.t
   }
 
 module type CONFIG = sig
@@ -145,7 +144,6 @@ end = struct
     in
     let* disk_size = get_disk_size s in
     let* page_size = get_page_size s in
-    let* format_uid = get_format_uid s in
     let* checksum_byte_size = s.@(checksum_byte_size) in
     let+ checksum_algorithm = s.@(checksum_algorithm) in
     let config =
@@ -153,7 +151,6 @@ end = struct
       ; page_size
       ; checksum_byte_size
       ; checksum_algorithm = string_of_int64 checksum_algorithm
-      ; format_uid
       }
     in
     config, s

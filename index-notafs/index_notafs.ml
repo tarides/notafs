@@ -1,7 +1,7 @@
 module Int63 = Optint.Int63
 
-module Make (Clock : Mirage_clock.MCLOCK) (B : Notafs.DISK) = struct
-  module Fs = Notafs.Make (B)
+module Make (Clock : Mirage_clock.MCLOCK) (B : Mirage_block.S) = struct
+  module Fs = Notafs.FS (Notafs.Adler32) (B)
 
   module IO = struct
     open Lwt.Syntax
@@ -11,7 +11,7 @@ module Make (Clock : Mirage_clock.MCLOCK) (B : Notafs.DISK) = struct
     let fs = ref None
 
     let init block =
-      let+ filesystem = Fs.of_block block in
+      let+ filesystem = Fs.connect block in
       fs := Some filesystem
 
     let fs () =
@@ -152,7 +152,7 @@ module Make (Clock : Mirage_clock.MCLOCK) (B : Notafs.DISK) = struct
         let* () = Fs.remove (fs ()) (Fs.filename file) in
         Lwt.return ()
       | Some header ->
-        let* () = Fs.replace (fs ()) (Fs.filename file) header in
+        let* () = Fs.rename (fs ()) ~src:(Fs.filename file) ~dst:header in
         Header_raw.set_generation file generation
 
     let flush ?no_callback:_ ?with_fsync:_ _ = ()

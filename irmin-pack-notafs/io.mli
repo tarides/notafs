@@ -14,12 +14,12 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-module Make (Clock : Mirage_clock.MCLOCK) (B : Notafs.DISK) : sig
+module Make (Clock : Mirage_clock.MCLOCK) (B : Mirage_block.S) : sig
   module Index_platform : Index.Platform.S
 
   val init : B.t -> unit Lwt.t
   val notafs_flush : unit -> unit
 
-  module Fs : module type of Notafs.Make (B)
+  module Fs : module type of Notafs.FS (Notafs.Adler32) (B)
   include Irmin_pack_io.Io_s
 end

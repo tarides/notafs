@@ -2,7 +2,7 @@ module Int63 = Optint.Int63
 
 module type S = Irmin_pack_io.Io_s
 
-module Make (Clock : Mirage_clock.MCLOCK) (B : Notafs.DISK) = struct
+module Make (Clock : Mirage_clock.MCLOCK) (B : Mirage_block.S) = struct
   module Index_platform = Index_notafs.Make (Clock) (B)
   module Fs = Index_platform.Fs
 

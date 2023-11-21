@@ -50,20 +50,17 @@ module Block = struct
      Fmt.pr "corrupting sector %a@." Fmt.int64 (Int64.add 4L i);
      Cstruct.set_uint8 s 345 13);
      write t i l *)
-
-  let discard _ _ = ()
-  let flush _ = ()
 end
 
 module Test (Check : Notafs.CHECKSUM) = struct
-  module Fs = Notafs.Make_check (Check) (Block)
+  module Fs = Notafs.FS (Check) (Block)
   open Lwt.Syntax
 
   let filename = "myfile"
   let connect () = Block.connect ~prefered_sector_size:(Some sector_size) disk
 
   let write ~fresh block =
-    let* fs = if fresh then Fs.format block else Fs.of_block block in
+    let* fs = if fresh then Fs.format block else Fs.connect block in
     let t0 = Unix.gettimeofday () in
     let* () =
       match Fs.find fs filename with
@@ -74,7 +71,7 @@ module Test (Check : Notafs.CHECKSUM) = struct
     let* () = Fs.flush fs in
     let t1 = Unix.gettimeofday () in
     Format.printf "Write: %fs@." (t1 -. t0) ;
-    Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Fs.stats fs) ;
+    (* Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Fs.stats fs) ; *)
     Lwt.return ()
 
   let read fs =
@@ -87,7 +84,7 @@ module Test (Check : Notafs.CHECKSUM) = struct
     Format.printf "Read: %fs@." (t1 -. t0) ;
     let result = Bytes.unsafe_to_string bytes in
     assert (result = input_contents) ;
-    Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Fs.stats fs) ;
+    (* Format.printf "%a@." (Repr.pp Notafs.Stats.ro_t) (Fs.stats fs) ; *)
     Lwt.return ()
 
   let main ~fresh () =
@@ -98,7 +95,7 @@ module Test (Check : Notafs.CHECKSUM) = struct
     (* let* () = write ~fresh:false block in
        let* () = Block.disconnect block in
        let* block = connect () in *)
-    let* fs = Fs.of_block block in
+    let* fs = Fs.connect block in
     let* () = read fs in
     Block.disconnect block
 

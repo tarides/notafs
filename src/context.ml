@@ -1,16 +1,3 @@
-module type DISK_EXTENSIONS = sig
-  (* to remove, only used for [block_viz] debugging *)
-  type t
-
-  val discard : t -> Int64.t -> unit
-  val flush : t -> unit
-end
-
-module type DISK = sig
-  include Mirage_block.S
-  include DISK_EXTENSIONS with type t := t
-end
-
 module type SIMPLE_DISK = sig
   type error
   type write_error
@@ -21,28 +8,11 @@ module type SIMPLE_DISK = sig
   val get_info : t -> Mirage_block.info Lwt.t
   val read : t -> int64 -> Cstruct.t list -> (unit, error) result Lwt.t
   val write : t -> int64 -> Cstruct.t list -> (unit, write_error) result Lwt.t
-
-  include DISK_EXTENSIONS with type t := t
-end
-
-module type CHECKSUM = sig
-  type t
-
-  val name : string
-  (** A short [name] (max 8 characters) to identify the checksum algorithm. *)
-
-  val equal : t -> t -> bool
-  val default : t
-  val of_int32 : Int32.t -> t
-  val to_int32 : t -> Int32.t
-  val digest_bigstring : Checkseum.bigstring -> int -> int -> t -> t
-
-  include Id.FIELD with type t := t
 end
 
 module type A_DISK = sig
   module Id : Id.S
-  module C : CHECKSUM
+  module C : Checksum.S
 
   val stats : Stats.t
   val dirty : bool ref
@@ -77,7 +47,6 @@ module type A_DISK = sig
   val write : Id.t -> Cstruct.t list -> (unit, [> `Write of write_error ]) Lwt_result.t
   val discard : Id.t -> unit
   val acquire_discarded : unit -> Id.t list
-  val flush : unit -> unit
   val allocator : (int -> (Id.t list, error) Lwt_result.t) ref
   val safe_lru : bool ref
   val allocate : from:[ `Root | `Load ] -> unit -> (sector Lru.elt, error) Lwt_result.t
@@ -93,7 +62,7 @@ end
 let of_impl
   (type t e we)
   (module B : SIMPLE_DISK with type t = t and type error = e and type write_error = we)
-  (module C : CHECKSUM)
+  (module C : Checksum.S)
   (disk : t)
   =
   let open Lwt.Syntax in
@@ -208,18 +177,13 @@ let of_impl
       Result.map_error (fun e -> `Write e) result
 
     let discarded = ref []
-
-    let discard page_id =
-      discarded := page_id :: !discarded ;
-      let page_id = Id.to_int64 page_id in
-      B.discard disk page_id
+    let discard page_id = discarded := page_id :: !discarded
 
     let acquire_discarded () =
       let lst = !discarded in
       discarded := [] ;
       List.rev lst
 
-    let flush () = B.flush disk
     let allocator = ref (fun _ -> failwith "no allocator")
     let lru = Lru.make ()
     let safe_lru = ref true
@@ -339,8 +303,7 @@ let of_impl
             | _ -> assert false
           in
           finalize ids acc ;
-          release_cstructs (List.map snd cstructs) ;
-          flush ()
+          release_cstructs (List.map snd cstructs)
         end
       end
       else

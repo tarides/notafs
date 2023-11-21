@@ -1,13 +1,6 @@
 open Lwt.Syntax
 
 module Main (Clock : Mirage_clock.MCLOCK) (Block : Mirage_block.S) = struct
-  module Block = struct
-    include Block
-
-    let discard _ _ = ()
-    let flush _ = ()
-  end
-
   module Conf = struct
     let entries = 32
     let stable_hash = 256

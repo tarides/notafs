@@ -1,8 +1,8 @@
 module Make (B : Mirage_block.S) : sig
-  include Notafs.DISK
+  include Mirage_block.S
 
   val draw_status : t -> string -> unit
-  val of_block : ?factor:int -> B.t -> t Lwt.t
+  val connect : ?factor:int -> B.t -> t Lwt.t
   val sleep : float ref
   val pause : bool ref
   val set_window_size : int * int -> unit
@@ -188,7 +188,7 @@ end = struct
     *)
     ()
 
-  let discard t i = draw_dead_sector t (Int64.to_int32 i)
+  (* let discard t i = draw_dead_sector t (Int64.to_int32 i) *)
 
   let () =
     G.open_graph " " ;
@@ -206,7 +206,7 @@ end = struct
     let size' = size + border in
     { factor; true_size; size; border; border_bottom; size' }
 
-  let of_block ?(factor = 1) block =
+  let connect ?(factor = 1) block =
     let open Lwt.Syntax in
     let+ info = B.get_info block in
     let vars = vars factor in
@@ -259,4 +259,9 @@ end = struct
     G.synchronize () ;
     Unix.sleepf !sleep ;
     ()
+
+  let write t i cs =
+    let r = write t i cs in
+    flush t ;
+    r
 end
