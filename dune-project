@@ -3,10 +3,10 @@
 (generate_opam_files true)
 
 (name notafs)
-(source (github art-w/notafs))
+(source (github tarides/notafs))
 (license ISC)
-(authors "Arthur Wendling")
-(maintainers "art.wendling@gmail.com")
+(authors "Arthur Wendling" "Gwenaëlle Lecat" "Charlène Gros")
+(maintainers "arthur@tarides.com")
 (version 0.1)
 
 (package
@@ -26,6 +26,14 @@
     (color :with-test)))
 
 (package
+  (name notafs-cli)
+  (synopsis "Notafs command-line tool")
+  (depends
+    (notafs :=version)
+    cmdliner
+    fmt))
+
+(package
   (name lwt_direct)
   (synopsis "Direct style for Lwt")
   (depends
@@ -37,7 +45,7 @@
   (synopsis "Index using notafs")
   (depends
     (index (= "dev"))
-    notafs
+    (notafs :=version)
     lwt_direct))
 
 (package
@@ -45,6 +53,6 @@
   (synopsis "Irmin-pack using notafs")
   (depends
     (irmin-pack (= "dev"))
-    index-notafs
+    (index-notafs :=version)
     ppx_irmin
     lwt_direct))

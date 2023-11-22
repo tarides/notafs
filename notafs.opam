@@ -2,11 +2,11 @@
 opam-version: "2.0"
 version: "0.1"
 synopsis: "Not a filesystem for MirageOS block devices"
-maintainer: ["art.wendling@gmail.com"]
-authors: ["Arthur Wendling"]
+maintainer: ["arthur@tarides.com"]
+authors: ["Arthur Wendling" "Gwenaëlle Lecat" "Charlène Gros"]
 license: "ISC"
-homepage: "https://github.com/art-w/notafs"
-bug-reports: "https://github.com/art-w/notafs/issues"
+homepage: "https://github.com/tarides/notafs"
+bug-reports: "https://github.com/tarides/notafs/issues"
 depends: [
   "dune" {>= "3.1"}
   "ocaml" {>= "4.12.0"}
@@ -36,4 +36,4 @@ build: [
     "@doc" {with-doc}
   ]
 ]
-dev-repo: "git+https://github.com/art-w/notafs.git"
+dev-repo: "git+https://github.com/tarides/notafs.git"

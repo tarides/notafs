@@ -1,6 +1,6 @@
 (executable
  (name notafs_cli)
  (public_name notafs-cli)
- (package notafs)
+ (package notafs-cli)
  (modules notafs_cli commands common_args context)
  (libraries notafs fmt fmt.tty cmdliner mirage-block-unix mirage-clock-unix))
