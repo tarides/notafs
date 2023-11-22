@@ -238,8 +238,8 @@ module Make (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) = struct
       | segment :: [] ->
         (match M.find_opt segment fs with
          | None -> Lwt_result.return (M.add segment (File (time, rope)) fs)
-         | Some (File (_, rope)) ->
-           let+ () = Rope.free !rope in
+         | Some (File (_, old_rope)) ->
+           let+ () = Rope.free !old_rope in
            M.add segment (File (time, rope)) fs
          | Some (Dir (_, fs')) ->
            let+ () = free fs' in
@@ -247,8 +247,8 @@ module Make (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) = struct
       | segment :: xs ->
         (match M.find_opt segment fs with
          | None -> Lwt_result.return (create fs segment xs)
-         | Some (File (_, rope)) ->
-           let+ () = Rope.free !rope in
+         | Some (File (_, old_rope)) ->
+           let+ () = Rope.free !old_rope in
            create fs segment xs
          | Some (Dir (_, fs')) ->
            let+ fs' = add fs' xs in
