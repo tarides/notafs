@@ -1,7 +1,7 @@
 open Lwt.Syntax
 
-module Main (Block : Mirage_block.S) = struct
-  module Kv = Notafs.KV (Notafs.No_checksum) (Block)
+module Main (Pclock : Mirage_clock.PCLOCK) (Block : Mirage_block.S) = struct
+  module Kv = Notafs.KV (Pclock) (Notafs.Adler32) (Block)
 
   let force lwt =
     let open Lwt.Infix in
@@ -10,7 +10,7 @@ module Main (Block : Mirage_block.S) = struct
     | Ok v -> v
     | Error _ -> failwith "error"
 
-  let start block =
+  let start _pclock block =
     let* fs = force @@ Kv.format block in
     let* () = force @@ Kv.set fs (Mirage_kv.Key.v "hello") "world!" in
     let* contents = force @@ Kv.get fs (Mirage_kv.Key.v "hello") in

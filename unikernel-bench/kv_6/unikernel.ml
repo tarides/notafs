@@ -1,6 +1,6 @@
 open Lwt.Syntax
 
-module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
+module Main (Pclock : Mirage_clock.PCLOCK) (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
   let nb_run = 50
 
   let force lwt =
@@ -176,7 +176,7 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
         iterate store (List.tl file_size_l))
   end
 
-  module Notaf = Notafs.KV (Notafs.No_checksum) (Block)
+  module Notaf = Notafs.KV (Pclock) (Notafs.No_checksum) (Block)
   module Tar = Tar_mirage.Make_KV_RW (Pclock) (Block)
   module Bench_notaf = Bench (Notaf)
 
@@ -203,7 +203,7 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
 
   let init_fs_size_list min max step = List.rev (init_l [] min max step)
 
-  let start block store =
+  let start _pclock block store =
     let file_size_l =
       init_fs_size_list 1_000 100_000 10_000
       @ init_fs_size_list 100_000 1_000_000 100_000
