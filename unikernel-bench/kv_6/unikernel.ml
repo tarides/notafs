@@ -1,7 +1,7 @@
 open Lwt.Syntax
 
 module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
-  let nb_run = 10
+  let nb_run = 50
 
   let force lwt =
     let open Lwt.Infix in
@@ -11,14 +11,10 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
     | Error _ -> failwith "error"
 
   let median sorted_l =
-    match sorted_l with
-    | [] -> 0
-    | hd :: [] -> hd
-    | _ ->
-      let len = List.length sorted_l in
-      if len mod 2 = 0
-      then (List.nth sorted_l (len / 2) + List.nth sorted_l ((len / 2) + 1)) / 2
-      else List.nth sorted_l ((len + 1) / 2)
+    let len = List.length sorted_l in
+    if len mod 2 = 0
+    then (List.nth sorted_l (len / 2) + List.nth sorted_l ((len / 2) + 1)) / 2
+    else List.nth sorted_l (len / 2)
 
   let pp_perf acc n l =
     let l = List.sort compare l in
@@ -63,11 +59,7 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
 
     let bench_get_partial fs file_size =
       bench Kv.pp_error (fun key ->
-        Kv.get_partial
-          fs
-          key
-          ~offset:(Optint.Int63.of_int (file_size / 2))
-          ~length:(file_size / 4))
+        Kv.get_partial fs key ~offset:(Optint.Int63.of_int (file_size / 2)) ~length:1024)
 
     let rec n_bench_set acc l n block file_size f =
       if n = 0
@@ -204,7 +196,7 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
   module Bench_doc = Bench_RO (Doc)
 
   let rec init_l l acc max step =
-    if acc > max then l else init_l (acc :: l) (acc + step) max step
+    if acc >= max then l else init_l (acc :: l) (acc + step) max step
 
   let init_fs_size_list min max step = List.rev (init_l [] min max step)
 
@@ -214,14 +206,14 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
       @ init_fs_size_list 100_000 1_000_000 100_000
       @ init_fs_size_list 1_000_000 10_000_000 1_000_000
       @ init_fs_size_list 10_000_000 100_000_000 20_000_000
-      @ init_fs_size_list 100_000_000 180_000_001 20_000_000
+      @ init_fs_size_list 100_000_000 400_000_001 20_000_000
     in
     Format.printf "#NOTAFS@." ;
     let* () = Bench_notaf.iterate block file_size_l in
     Format.printf "@.@.#TAR@." ;
     let* () = Bench_tar.iterate block file_size_l in
-    (*Format.printf "@.@.#DOCTEUR@." ;
-      let* () = Bench_doc.iterate store file_size_l in*)
+    Format.printf "@.@.#DOCTEUR@." ;
+    let* () = Bench_doc.iterate store file_size_l in
     let+ () = Block.disconnect block in
     ()
 end

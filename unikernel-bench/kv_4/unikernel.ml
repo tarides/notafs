@@ -1,7 +1,7 @@
 open Lwt.Syntax
 
 module Main (Block : Mirage_block.S) = struct
-  let nb_run = 10
+  let nb_run = 50
 
   let force lwt =
     let open Lwt.Infix in
@@ -11,14 +11,10 @@ module Main (Block : Mirage_block.S) = struct
     | Error _ -> failwith "error"
 
   let median sorted_l =
-    match sorted_l with
-    | [] -> 0
-    | hd :: [] -> hd
-    | _ ->
-      let len = List.length sorted_l in
-      if len mod 2 = 0
-      then (List.nth sorted_l (len / 2) + List.nth sorted_l ((len / 2) + 1)) / 2
-      else List.nth sorted_l ((len + 1) / 2)
+    let len = List.length sorted_l in
+    if len mod 2 = 0
+    then (List.nth sorted_l (len / 2) + List.nth sorted_l ((len / 2) + 1)) / 2
+    else List.nth sorted_l (len / 2)
 
   let pp_perf acc n l =
     let l = List.sort compare l in
@@ -76,7 +72,7 @@ module Main (Block : Mirage_block.S) = struct
 
     let bench_get_partial fs file_size =
       bench Kv.pp_error (fun key ->
-        Kv.get_partial fs key ~offset:(file_size / 2) ~length:(file_size / 4))
+        Kv.get_partial fs key ~offset:(file_size / 2) ~length:1024)
 
     let rec n_bench_set acc l n block file_size f =
       if n = 0
@@ -146,7 +142,7 @@ module Main (Block : Mirage_block.S) = struct
 
   module Fat = Fat.Make (Block)
 
-  (*module Bench_fat = Bench (struct
+  module Bench_fat = Bench (struct
       include Fat
 
       let connect block =
@@ -174,7 +170,18 @@ module Main (Block : Mirage_block.S) = struct
           | _ -> failwith "ERROR"
         in
         Lwt.return (Ok str)
-    end)*)
+
+      let get_partial block key ~offset ~length =
+        let name = Mirage_kv.Key.to_string key in
+        let* info = force @@ Fat.stat block name in
+        let* res = Fat.read block name offset length in
+        let str =
+          match res with
+          | Ok [ cstruct ] -> Cstruct.to_string cstruct
+          | _ -> failwith "ERROR"
+        in
+        Lwt.return (Ok str)
+    end)
 
   let rec init_l l acc max step =
     if acc > max then l else init_l (acc :: l) (acc + step) max step
@@ -190,10 +197,10 @@ module Main (Block : Mirage_block.S) = struct
       @ init_fs_size_list 100_000_000 180_000_001 20_000_000
     in
     Format.printf "#CHAMELON@." ;
-    (* Supposed to crash after 140M *)
+    (* Expected to crash after 140M *)
     let* () = Bench_cha.iterate block file_size_l in
-    (*Format.printf "@.@.#FAT@." ;
-      let* () = Bench_fat.iterate block file_size_l in*)
+    Format.printf "@.@.#FAT@." ;
+    let* () = Bench_fat.iterate block file_size_l in
     let+ () = Block.disconnect block in
     ()
 end
