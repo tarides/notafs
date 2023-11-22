@@ -11,10 +11,13 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
     | Error _ -> failwith "error"
 
   let median sorted_l =
-    let len = List.length sorted_l in
-    if len mod 2 = 0
-    then (List.nth sorted_l (len / 2) + List.nth sorted_l ((len / 2) + 1)) / 2
-    else List.nth sorted_l (len / 2)
+    match sorted_l with
+    | [] -> 0
+    | _ ->
+      let len = List.length sorted_l in
+      if len mod 2 = 0
+      then (List.nth sorted_l ((len - 1) / 2) + List.nth sorted_l (len / 2)) / 2
+      else List.nth sorted_l (len / 2)
 
   let pp_perf acc n l =
     let l = List.sort compare l in

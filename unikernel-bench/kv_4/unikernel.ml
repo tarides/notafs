@@ -11,10 +11,13 @@ module Main (Block : Mirage_block.S) = struct
     | Error _ -> failwith "error"
 
   let median sorted_l =
-    let len = List.length sorted_l in
-    if len mod 2 = 0
-    then (List.nth sorted_l (len / 2) + List.nth sorted_l ((len / 2) + 1)) / 2
-    else List.nth sorted_l (len / 2)
+    match sorted_l with
+    | [] -> 0
+    | _ ->
+      let len = List.length sorted_l in
+      if len mod 2 = 0
+      then (List.nth sorted_l ((len - 1) / 2) + List.nth sorted_l (len / 2)) / 2
+      else List.nth sorted_l (len / 2)
 
   let pp_perf acc n l =
     let l = List.sort compare l in
@@ -184,7 +187,7 @@ module Main (Block : Mirage_block.S) = struct
     end)
 
   let rec init_l l acc max step =
-    if acc > max then l else init_l (acc :: l) (acc + step) max step
+    if acc >= max then l else init_l (acc :: l) (acc + step) max step
 
   let init_fs_size_list min max step = List.rev (init_l [] min max step)
 

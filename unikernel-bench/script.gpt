@@ -14,9 +14,16 @@ plot 'bench' index 0 using 1:($2 / 1e6) with lines lw 2 title 'Notafs',\
      'bench' index 1 using 1:($2 / 1e6) with lines lw 2 title 'Tar',\
      'bench' index 3 using 1:($2 / 1e6) with lines lw 2 title 'Chamelon',\
      'bench' index 4 using 1:($2 / 1e6) with lines lw 2 title 'Fat'
-
-set title 'get (read large file)
-set yrange [0:500]
+set title 'Get partial'
+set logscale y
+plot 'bench' index 0 using 1:($4 / 1e6) with lines lw 2 title 'Notafs',\
+     'bench' index 1 using 1:($4 / 1e6) with lines lw 2 title 'Tar',\
+     'bench' index 3 using 1:($4 / 1e6) with lines lw 2 title 'Chamelon',\
+     'bench' index 4 using 1:($4 / 1e6) with lines lw 2 title 'Fat',\
+     #'bench' index 2 using 1:($3 / 1e6) with lines lw 2 title 'Docteur'
+set title 'Get'
+unset logscale y
+set yrange [0:700]
 plot 'bench' index 0 using 1:($3 / 1e6) with lines lw 2 title 'Notafs',\
      'bench' index 1 using 1:($3 / 1e6) with lines lw 2 title 'Tar',\
      'bench' index 3 using 1:($3 / 1e6) with lines lw 2 title 'Chamelon',\
