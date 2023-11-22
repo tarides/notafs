@@ -1,6 +1,6 @@
 open Lwt.Syntax
 
-module Main (Pclock : Mirage_clock.PCLOCK) (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
+module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
   let nb_run = 50
 
   let force lwt =
@@ -203,7 +203,7 @@ module Main (Pclock : Mirage_clock.PCLOCK) (Block : Mirage_block.S) (Doc : Mirag
 
   let init_fs_size_list min max step = List.rev (init_l [] min max step)
 
-  let start _pclock block store =
+  let start block store =
     let file_size_l =
       init_fs_size_list 1_000 100_000 10_000
       @ init_fs_size_list 100_000 1_000_000 100_000

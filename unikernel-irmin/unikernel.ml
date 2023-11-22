@@ -1,10 +1,6 @@
 open Lwt.Syntax
 
-module Main
-    (Mclock : Mirage_clock.MCLOCK)
-    (Pclock : Mirage_clock.PCLOCK)
-    (Block : Mirage_block.S) =
-struct
+module Main (Block : Mirage_block.S) = struct
   module Conf = struct
     let entries = 32
     let stable_hash = 256
@@ -42,7 +38,7 @@ struct
 
   let info () = Store.Info.v Int64.zero ~message:"test"
 
-  let start _mclock _pclock block =
+  let start block =
     let* fresh =
       Lwt.catch
         (fun () ->
