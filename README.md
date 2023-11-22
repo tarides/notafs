@@ -58,7 +58,7 @@ notafs/ $ truncate -s 200K /tmp/notafs-irmin
 notafs/ $ dune exec -- ./tests/test_irmin.exe   # --help for options
 ```
 
-https://github.com/art-w/notafs/assets/4807590/5bff0478-0b94-4bcb-a5fc-7cc6fcb57531
+https://github.com/art-w/notafs/assets/4807590/6ad6f2e7-7c54-4ed9-8af6-b0cc0c5329f3
 
 ## Notafs-CLI
 
