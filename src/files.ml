@@ -55,8 +55,11 @@ module Make (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) = struct
   let count_new t =
     let* files_count = count_new t.files in
     let+ on_disk_count =
-      if files_count = 0 && (not t.dirty) && false
-      then Lwt_result.return 0
+      if not t.dirty
+      then begin
+        assert (files_count = 0) ;
+        Lwt_result.return 0
+      end
       else begin
         let str = string_of_raw (fake t.files) in
         let* rope = Rope.of_string str in
@@ -335,13 +338,18 @@ module Make (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) = struct
 
   let filename key = String.concat "/" key
   let size rope = Rope.size !rope
-  let blit_to_bytes rope ~off ~len bytes = Rope.blit_to_bytes !rope off bytes 0 len
 
-  let blit_from_string rope ~off ~len str =
+  let blit_to_bytes t rope ~off ~len bytes =
+    t.dirty <- true ;
+    Rope.blit_to_bytes !rope off bytes 0 len
+
+  let blit_from_string t rope ~off ~len str =
+    t.dirty <- true ;
     let+ t = Rope.blit_from_string !rope off str 0 len in
     rope := t
 
-  let append_from rope arg =
+  let append_from t rope arg =
+    t.dirty <- true ;
     let+ t_rope = Rope.append_from !rope arg in
     rope := t_rope
 
@@ -358,28 +366,6 @@ module Make (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) = struct
          | File _ -> raise Dir_expected)
     in
     list t.files path
-
-  (* let prefix' = if prefix = "/" then "/" else prefix ^ "/" in
-    let prefix_len = String.length prefix' in
-    let lst =
-      let lst =
-        List.filter_map (fun (filename, _) ->
-          if not (String.starts_with ~prefix:prefix' filename)
-          then None
-          else (
-            match String.index_from_opt filename prefix_len '/' with
-            | None ->
-              let len = String.length filename in
-              let filename = String.sub filename prefix_len (len - prefix_len) in
-              Some (filename, `Value)
-            | Some offset ->
-              let dirname = String.sub filename prefix_len (offset - prefix_len) in
-              Some (dirname, `Dictionary)))
-        @@ M.bindings t.files
-      in
-      List.sort_uniq Stdlib.compare lst
-    in
-    lst *)
 
   let reachable_size _t = failwith "to fix"
   (* if M.cardinal t.files = 0
@@ -399,5 +385,6 @@ module Make (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) = struct
     let* rope = Rope.of_string str in
     let file = ref rope in
     let+ files = add t filename file in
+    assert t.dirty ;
     files, file
 end

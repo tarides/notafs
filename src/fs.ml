@@ -162,7 +162,7 @@ module Make_disk (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) :
   let filename t = Files.filename (fst t)
 
   let append_substring t ((_filename, rope) : file) str ~off ~len =
-    with_lock t @@ fun () -> Files.append_from rope (str, off, off + len)
+    with_lock t @@ fun () -> Files.append_from t.files rope (str, off, off + len)
 
   let rename t ~src ~dst =
     with_lock t
@@ -188,10 +188,10 @@ module Make_disk (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) :
     filename, rope
 
   let blit_to_bytes t (_, file) ~off ~len bytes =
-    with_lock t @@ fun () -> Files.blit_to_bytes file ~off ~len bytes
+    with_lock t @@ fun () -> Files.blit_to_bytes t.files file ~off ~len bytes
 
   let blit_from_string t (_, file) ~off ~len bytes =
-    with_lock t @@ fun () -> Files.blit_from_string file ~off ~len bytes
+    with_lock t @@ fun () -> Files.blit_from_string t.files file ~off ~len bytes
 
   let find_opt t filename =
     match Files.find_opt t.files filename with
@@ -208,7 +208,7 @@ module Make_disk (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) :
     | Some file ->
       let* size = Files.size file in
       let bytes = Bytes.create size in
-      let+ quantity = Files.blit_to_bytes file bytes ~off:0 ~len:size in
+      let+ quantity = Files.blit_to_bytes t.files file bytes ~off:0 ~len:size in
       assert (quantity = size) ;
       Some (Bytes.unsafe_to_string bytes)
 
@@ -223,7 +223,7 @@ module Make_disk (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) :
       assert (off >= 0) ;
       assert (off + length <= size) ;
       let bytes = Bytes.create length in
-      let+ quantity = Files.blit_to_bytes file bytes ~off ~len:length in
+      let+ quantity = Files.blit_to_bytes t.files file bytes ~off ~len:length in
       assert (quantity = size) ;
       Some (Bytes.unsafe_to_string bytes)
 
@@ -235,7 +235,7 @@ module Make_disk (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) :
     | Some file ->
       let off = Optint.Int63.to_int offset in
       let len = String.length contents in
-      let+ () = Files.blit_from_string file ~off ~len contents in
+      let+ () = Files.blit_from_string t.files file ~off ~len contents in
       true
 end
 
