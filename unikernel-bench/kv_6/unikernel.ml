@@ -176,7 +176,7 @@ module Main (Block : Mirage_block.S) (Doc : Mirage_kv.RO) = struct
         iterate store (List.tl file_size_l))
   end
 
-  module Notaf = Notafs.KV (Notafs.No_checksum) (Block)
+  module Notaf = Notafs.KV (Pclock) (Notafs.No_checksum) (Block)
   module Tar = Tar_mirage.Make_KV_RW (Pclock) (Block)
   module Bench_notaf = Bench (Notaf)
 

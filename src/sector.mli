@@ -30,6 +30,7 @@ module Make (B : Context.A_DISK) : sig
   val is_in_memory : t -> bool
   val finalize : t -> id list -> ((id * Cstruct.t) list * id list) r
   val free : t -> unit
+  val free_ptr : ptr -> unit
 
   (* *)
   val get_uint8 : t -> int -> int r

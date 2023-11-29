@@ -22,6 +22,7 @@ module Make (B : Context.A_DISK) = struct
   let set_key t i v = Sector.set_uint32 t (key_index i) v
   let get_child t i = Sector.get_child t (child_index i)
   let set_child t i v = Sector.set_child t (child_index i) v
+  let get_child_ptr t i = Sector.get_child_ptr t (child_index i)
 
   type append_result =
     | Ok
@@ -345,6 +346,12 @@ module Make (B : Context.A_DISK) = struct
         let rec go i =
           if i >= n
           then Lwt_result.return ()
+          else if height = 1
+          then begin
+            let* child_ptr = get_child_ptr t i in
+            Sector.free_ptr child_ptr ;
+            go (i + 1)
+          end
           else begin
             let* child = get_child t i in
             let* () = free child in

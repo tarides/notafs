@@ -1,6 +1,6 @@
 open Lwt.Syntax
 
-module Main (Clock : Mirage_clock.MCLOCK) (Block : Mirage_block.S) = struct
+module Main (Block : Mirage_block.S) = struct
   module Conf = struct
     let entries = 32
     let stable_hash = 256
@@ -22,7 +22,7 @@ module Main (Clock : Mirage_clock.MCLOCK) (Block : Mirage_block.S) = struct
   end
 
   module Store = struct
-    module Maker = Irmin_pack_notafs.Maker (Clock) (Block) (Conf)
+    module Maker = Irmin_pack_notafs.Maker (Mclock) (Pclock) (Block) (Conf)
     include Maker.Make (Schema)
 
     let config ?(readonly = false) ?(fresh = true) root =
@@ -37,17 +37,19 @@ module Main (Clock : Mirage_clock.MCLOCK) (Block : Mirage_block.S) = struct
   module Io = Store.Maker.Io
 
   let info () = Store.Info.v Int64.zero ~message:"test"
-  let fresh = false
 
-  let start _ b =
-    let* () =
-      if fresh
-      then
-        let+ _ = Fs.format b in
-        ()
-      else Lwt.return_unit
+  let start block =
+    let* fresh =
+      Lwt.catch
+        (fun () ->
+          let+ _ = Fs.connect block in
+          false)
+        (function
+         | _ ->
+           let+ _ = Fs.format block in
+           true)
     in
-    let* () = Io.init b in
+    let* () = Io.init block in
     Lwt_direct.indirect
     @@ fun () ->
     Eio_mock.Backend.run

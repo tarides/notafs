@@ -284,6 +284,10 @@ module Make (B : Context.A_DISK) = struct
     t.id <- Freed ;
     drop_from_parent t
 
+  let free_ptr = function
+    | Disk (id, _) -> B.discard id
+    | Mem t -> free t
+
   let detach_region t ~off ~len =
     let* () = release t in
     let+ cstruct = rw_cstruct t in

@@ -21,6 +21,7 @@
     repr
     ppx_repr
     (mirage-block-unix :with-test)
+    (mirage-clock-unix :with-test)
     (tar-mirage :with-test)
     (graphics :with-test)
     (color :with-test)))

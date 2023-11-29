@@ -43,12 +43,12 @@ The integration with Irmin relies on OCaml 5 support for algebraic effects: Whil
 $ opam switch 5.0.0
 
 # Enable experimental support for OCaml 5 on solo5:
-$ opam pin https://github.com/mirage/ocaml-solo5.git#500-cleaned
+$ opam pin 'https://github.com/mirage/ocaml-solo5.git#500-cleaned'
 
 notafs/ $ opam pin . --with-version=dev
 ```
 
-The Irmin unikernel demo on solo5 can be run by following the same steps as for the mirage-kv one above.
+The Irmin unikernel demo on solo5 can be run by following the same steps as for the `mirage-kv` one above. You may have to set `solo5` version to `0.8.0` in `mirage/block_test-hvt.opam` before running `make depends`.
 
 The tests include a visualization of Irmin running on a Mirage block device, performing commits and garbage collection. Each 1kb sector is represented by a 32x32 pixel square (colored pages contain live data, grey crossed ones are free). Epilepsy warning: the slowed recording of the test below contains flashing lights.
 
@@ -58,7 +58,7 @@ notafs/ $ truncate -s 200K /tmp/notafs-irmin
 notafs/ $ dune exec -- ./tests/test_irmin.exe   # --help for options
 ```
 
-https://github.com/art-w/notafs/assets/4807590/6ad6f2e7-7c54-4ed9-8af6-b0cc0c5329f3
+https://github.com/art-w/notafs/assets/4807590/915f6967-d26e-47fe-b53c-467762c24f05
 
 ## Notafs-CLI
 
