@@ -1,13 +1,34 @@
+(** Checksum signatures & default implementations. *)
+
+(** Signature for checksum modules. *)
 module type S = sig
   type t
+  (** Representation of the checksum value. *)
 
   val name : string
+  (** Name of the implementation.
+
+      This will be used to check that the disk used the same algorithm. *)
+
   val byte_size : int
+  (** Size of the values once written.
+
+      This will be used to check that the disk used the same algorithm. *)
+
   val default : t
+  (** Default value of {!t}. *)
+
   val equal : t -> t -> bool
+  (** [equal t1 t2] is the equality between [t1] and [t2]. *)
+
   val digest : Cstruct.t -> t
+  (** [digest cs] is the digest of the cstruct [cs]. *)
+
   val read : Cstruct.t -> int -> t
+  (** [read cs off] is the value {!t} read from the cstruct [cs] at offset [off]. *)
+
   val write : Cstruct.t -> int -> t -> unit
+  (** [write cs off t] writes the value {!t} into the cstruct [cs] at offset [off]. *)
 end
 
 module No_checksum : S = struct

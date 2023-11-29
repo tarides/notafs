@@ -13,7 +13,6 @@ module Make (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) : sig
   (* *)
   val exists : t -> key -> [> `Dictionary | `Value ] option
   val last_modified : t -> key -> Ptime.t
-  val find : t -> key -> file
   val find_opt : t -> key -> file option
   val filename : key -> string
   val size : file -> int io

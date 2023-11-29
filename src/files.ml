@@ -27,9 +27,6 @@ module Make (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) = struct
     ; mutable dirty : bool
     }
 
-  exception File_expected
-  exception Dir_expected
-
   let string_of_raw = Repr.(unstage (to_bin_string raw_fs_t))
   let raw_of_string = Repr.(unstage (of_bin_string raw_fs_t))
 
@@ -183,20 +180,6 @@ module Make (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) = struct
          | File _ -> raise Not_found)
     in
     last_modified t.files filename
-
-  let find t filename =
-    let rec find fs = function
-      | [] -> raise Not_found
-      | segment :: [] ->
-        (match M.find segment fs with
-         | Dir _ -> raise File_expected
-         | File (_, r) -> r)
-      | segment :: xs ->
-        (match M.find segment fs with
-         | Dir (_, fs) -> find fs xs
-         | File _ -> raise Not_found)
-    in
-    find t.files filename
 
   let find_opt t filename =
     let rec find_opt fs = function
@@ -355,7 +338,7 @@ module Make (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) = struct
       | segment :: xs ->
         (match M.find segment fs with
          | Dir (_, fs) -> list fs xs
-         | File _ -> raise Dir_expected)
+         | File _ -> raise Not_found)
     in
     list t.files path
 
