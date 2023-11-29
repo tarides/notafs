@@ -11,9 +11,7 @@ module type S = sig
       This will be used to check that the disk used the same algorithm. *)
 
   val byte_size : int
-  (** Size of the values once written.
-
-      This will be used to check that the disk used the same algorithm. *)
+  (** Number of bytes used by the checksum. *)
 
   val default : t
   (** Default value of {!t}. *)
@@ -22,13 +20,15 @@ module type S = sig
   (** [equal t1 t2] is the equality between [t1] and [t2]. *)
 
   val digest : Cstruct.t -> t
-  (** [digest cs] is the digest of the cstruct [cs]. *)
+  (** [digest cs] computes the checksum of the cstruct [cs]. *)
 
   val read : Cstruct.t -> int -> t
-  (** [read cs off] is the value {!t} read from the cstruct [cs] at offset [off]. *)
+  (** [read cs off] is the value {!t} read from the cstruct [cs] at offset [off].
+      It's guaranteed that at least {!byte_size} bytes are available at this offset. *)
 
   val write : Cstruct.t -> int -> t -> unit
-  (** [write cs off t] writes the value {!t} into the cstruct [cs] at offset [off]. *)
+  (** [write cs off t] writes the value {!t} into the cstruct [cs] at offset [off].
+      It's guaranteed that at least {!byte_size} bytes are available at this offset. *)
 end
 
 module No_checksum : S = struct
