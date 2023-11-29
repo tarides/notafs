@@ -66,13 +66,6 @@ module KV (Clock : Mirage_clock.PCLOCK) (Check : CHECKSUM) (Block : Mirage_block
   type write_error = error
   (** The type for write errors (See {!error}). *)
 
-  (** See [Mirage_kv.RW]'s documentation for more informations. *)
-  include
-    Mirage_kv.RW
-      with type t := t
-       and type error := error
-       and type write_error := write_error
-
   val format : Block.t -> (t, write_error) Lwt_result.t
   (** [format block] will format [block] into a usable disk and connects to it.
 
@@ -85,6 +78,13 @@ module KV (Clock : Mirage_clock.PCLOCK) (Check : CHECKSUM) (Block : Mirage_block
 
   val free_space : t -> int64
   (** [free_space t] returns the space available on the disk [t]. *)
+
+  (** See [Mirage_kv.RW]'s documentation for more informations. *)
+  include
+    Mirage_kv.RW
+      with type t := t
+       and type error := error
+       and type write_error := write_error
 end
 
 (** {2:store-fs FS, file system approach} *)
