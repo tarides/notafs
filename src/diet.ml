@@ -9,6 +9,8 @@ end
 module Make (Id : S) = struct
   module Diet = Map.Make (Id)
 
+  type t = int Diet.t
+
   let empty = Diet.empty
 
   let add t k =
