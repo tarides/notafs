@@ -68,6 +68,7 @@ let of_impl
   (module struct
     module Id = (val Id.of_nb_pages info.size_sectors)
     module Check = Check
+    module Diet = Diet.Make (Id)
 
     type page =
       | Cstruct of Cstruct.t
@@ -143,12 +144,12 @@ let of_impl
       let+ result = B.write disk page_id cstructs in
       Result.map_error (fun e -> `Write e) result
 
-    let discarded = ref []
-    let discard page_id = discarded := page_id :: !discarded
+    let discarded = ref Diet.empty
+    let discard page_id = discarded := Diet.add !discarded page_id
 
     let acquire_discarded () =
-      let lst = !discarded in
-      discarded := [] ;
+      let lst = Diet.to_list !discarded in
+      discarded := Diet.empty ;
       List.rev lst
 
     let allocator = ref (fun _ -> failwith "no allocator")
