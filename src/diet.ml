@@ -13,24 +13,29 @@ module Make (Id : S) = struct
 
   let empty = Diet.empty
 
-  let add t k =
+  let add_range t (k, len) =
     let mlo =
-      match Diet.find_last (fun key -> Id.compare key k <= 0) t with
-      | mlk, mlv ->
-        assert (Id.compare k (Id.add mlk mlv) >= 0) ;
-        if Id.compare k (Id.add mlk mlv) = 0 then Some mlv else None
+      match Diet.find_last (fun key -> Id.compare key (Id.add k (len - 1)) <= 0) t with
+      | mlk, mlv -> begin
+        match Id.compare k (Id.add mlk mlv) with
+        | 0 -> Some mlv
+        | r when r > 0 -> None
+        | _ -> assert false
+      end
       | exception Not_found -> None
     in
-    let mro = Diet.find_opt (Id.add k 1) t in
+    let mro = Diet.find_opt (Id.add k len) t in
     match mlo, mro with
     | Some mlv, Some mrv ->
-      let t = Diet.remove (Id.add k 1) t in
-      Diet.add (Id.add k (-mlv)) (mlv + mrv + 1) t
-    | Some mlv, None -> Diet.add (Id.add k (-mlv)) (mlv + 1) t
+      let t = Diet.remove (Id.add k len) t in
+      Diet.add (Id.add k (-mlv)) (mlv + len + mrv) t
+    | Some mlv, None -> Diet.add (Id.add k (-mlv)) (mlv + len) t
     | None, Some mrv ->
-      let t = Diet.remove (Id.add k 1) t in
-      Diet.add k (mrv + 1) t
-    | None, None -> Diet.add k 1 t
+      let t = Diet.remove (Id.add k len) t in
+      Diet.add k (mrv + len) t
+    | None, None -> Diet.add k len t
+
+  let add t k = add_range t (k, 1)
 
   let to_list t =
     Diet.fold
@@ -41,4 +46,15 @@ module Make (Id : S) = struct
         explode s l acc)
       t
       []
+
+  let of_list l =
+    let t = empty in
+    let rec adding t l =
+      match l with
+      | [] -> t
+      | hd :: tl -> adding (add t hd) tl
+    in
+    adding t l
+
+  let to_range_list t = Diet.bindings t
 end

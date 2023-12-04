@@ -44,6 +44,7 @@ module type A_DISK = sig
   val read : Id.t -> Cstruct.t -> (unit, [> `Read of read_error ]) Lwt_result.t
   val write : Id.t -> Cstruct.t list -> (unit, [> `Write of write_error ]) Lwt_result.t
   val discard : Id.t -> unit
+  val discard_range : Id.t * int -> unit
   val acquire_discarded : unit -> Id.t list
   val allocator : (int -> (Id.t list, error) Lwt_result.t) ref
   val allocate : from:[ `Root | `Load ] -> unit -> (sector Lru.elt, error) Lwt_result.t
@@ -118,20 +119,6 @@ let of_impl
     let page_size = info.sector_size
     let nb_sectors = info.size_sectors
 
-    let rec regroup (first, last, cs, acc) = function
-      | [] -> List.rev ((first, List.rev cs) :: acc)
-      | (id, c) :: rest ->
-        if Id.(equal (succ last) id)
-        then regroup (first, id, c :: cs, acc) rest
-        else regroup (id, id, [ c ], (first, List.rev cs) :: acc) rest
-
-    let regroup = function
-      | [] -> invalid_arg "Root.regroup: empty list"
-      | (id, c) :: rest -> regroup (id, id, [ c ], []) rest
-
-    let regroup lst =
-      regroup @@ List.sort (fun (a_id, _) (b_id, _) -> Id.compare a_id b_id) lst
-
     let read page_id cstruct =
       let page_id = Id.to_int64 page_id in
       let open Lwt.Syntax in
@@ -146,6 +133,7 @@ let of_impl
 
     let discarded = ref Diet.empty
     let discard page_id = discarded := Diet.add !discarded page_id
+    let discard_range r = discarded := Diet.add_range !discarded r
 
     let acquire_discarded () =
       let lst = Diet.to_list !discarded in
@@ -210,14 +198,15 @@ let of_impl
         let* () = write id cs in
         write_all css
 
-    let write_all lst = write_all (regroup lst)
     let no_finalizer _ = failwith "no finalizer"
 
-    let rec list_align_with acc xs ys =
-      match xs, ys with
-      | rest, [] -> List.rev acc, rest
-      | x :: xs, _ :: ys -> list_align_with (x :: acc) xs ys
-      | _ -> assert false
+    let rec list_align_with acc rest n ss =
+      match rest, ss with
+      | ((_, len) as r) :: rest, _ when len = n -> list_align_with (r :: acc) rest 0 ss
+      | _, _ :: ss -> list_align_with acc rest (succ n) ss
+      | [], [] -> acc, rest
+      | _, [] when n = 0 -> acc, rest
+      | (id, len) :: rest, [] -> (id, n) :: acc, (Id.add id n, len - n) :: rest
 
     let rec lru_clear () =
       let open Lwt_result.Syntax in
@@ -260,6 +249,7 @@ let of_impl
         | _ -> begin
           let nb = List.length acc in
           let* ids = !allocator nb in
+          let ids = Diet.to_range_list (Diet.of_list ids) in
           let acc =
             List.filter
               (fun (s, _, _) ->
@@ -268,46 +258,50 @@ let of_impl
                 | _ -> false)
               acc
           in
-          let ids, ids_rest = list_align_with [] ids acc in
-          List.iter discard ids_rest ;
+          let ids, ids_rest = list_align_with [] ids 0 acc in
+          List.iter discard_range ids_rest ;
           let acc =
             List.sort
               (fun (_, a_depth, _) (_, b_depth, _) -> Int.compare b_depth a_depth)
               acc
           in
-          let rec finalize acc ids ss =
+          let rec finalize acc css ids n ss =
             match ids, ss with
             | [], [] -> Lwt_result.return acc
-            | id :: ids, (s, _, finalizer) :: ss ->
+            | (id, len) :: ids, _ when n = len ->
+              finalize ((id, List.rev css) :: acc) [] ids 0 ss
+            | (id, _) :: _, (s, _, finalizer) :: ss ->
               let* cstruct =
                 match s.cstruct with
                 | Cstruct cstruct ->
+                  let id = Id.add id n in
                   let+ () = finalizer id in
                   s.cstruct <- On_disk id ;
-                  id, cstruct
+                  cstruct
                 | On_disk _ -> assert false
                 | Freed -> assert false
               in
-              finalize (cstruct :: acc) ids ss
-            | _ -> assert false
+              finalize acc (cstruct :: css) ids (succ n) ss
+            | _, [] | [], _ -> assert false
           in
-          let* cstructs = finalize [] ids acc in
+          let* cstructs = finalize [] [] ids 0 acc in
           let+ () = write_all cstructs in
-          let rec finalize ids acc =
-            match ids, acc with
+          let rec sanity_check ids n ss =
+            match ids, ss with
             | [], [] -> ()
-            | id :: ids, (s, _, _) :: ss ->
+            | (_, len) :: ids, _ when n = len -> sanity_check ids 0 ss
+            | (id, _) :: _, (s, _, _) :: ss ->
               begin
                 match s.cstruct with
-                | On_disk id' -> assert (id = id')
-                | Cstruct _ -> failwith "Context.finalize: Cstruct"
-                | Freed -> failwith "Context.finalize: Freed"
+                | On_disk id' -> assert (Id.add id n = id')
+                | Cstruct _ -> failwith "Context.sanity_check: Cstruct"
+                | Freed -> failwith "Context.sanity_check: Freed"
               end ;
-              finalize ids ss
-            | _ -> assert false
+              sanity_check ids (succ n) ss
+            | _, [] | [], _ -> assert false
           in
-          finalize ids acc ;
-          release_cstructs (List.map snd cstructs)
+          sanity_check ids 0 acc ;
+          List.iter release_cstructs (List.map snd cstructs)
         end
       end
       else
