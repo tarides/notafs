@@ -1,13 +1,11 @@
 module Make (B : Context.A_DISK) = struct
   module Sector = Sector.Make (B)
 
-  type ('set, 'get) bifield =
-    { get : Sector.t -> ('get, B.error) Lwt_result.t
-    ; set : Sector.t -> 'set -> (unit, B.error) Lwt_result.t
+  type 'a field =
+    { get : Sector.t -> ('a, B.error) Lwt_result.t
+    ; set : Sector.t -> 'a -> (unit, B.error) Lwt_result.t
     }
   (* let bifield_map f g t = { get = (fun s -> f (t.get s)); set = (fun s x -> t.set s (g x)) } *)
-
-  type 'a field = ('a, 'a) bifield
 
   let bifield_pair x y =
     let open Lwt_result.Syntax in
