@@ -13,6 +13,7 @@ end
 module type A_DISK = sig
   module Id : Id.S
   module Check : Checksum.S
+  module Diet : module type of Diet.Make (Id)
 
   type read_error
   type write_error
@@ -45,7 +46,7 @@ module type A_DISK = sig
   val write : Id.t -> Cstruct.t list -> (unit, [> `Write of write_error ]) Lwt_result.t
   val discard : Id.t -> unit
   val discard_range : Id.t * int -> unit
-  val acquire_discarded : unit -> Id.t list
+  val acquire_discarded : unit -> (Id.t * int) list
   val allocator : (int -> (Id.t list, error) Lwt_result.t) ref
   val allocate : from:[ `Root | `Load ] -> unit -> (sector Lru.elt, error) Lwt_result.t
   val unallocate : sector Lru.elt -> unit
@@ -136,7 +137,7 @@ let of_impl
     let discard_range r = discarded := Diet.add_range !discarded r
 
     let acquire_discarded () =
-      let lst = Diet.to_list !discarded in
+      let lst = Diet.to_range_list !discarded in
       discarded := Diet.empty ;
       List.rev lst
 

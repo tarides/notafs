@@ -317,7 +317,7 @@ module Make (B : Context.A_DISK) = struct
             let* () = s1.@(Schema.nth generations i) <- g in
             go (i + 1) gens
         in
-        let* () = go 0 free_gens in
+        let* () = go 0 (B.Diet.list_of_ranges free_gens) in
         let+ () = Sector.write_root s1 in
         t.current_idx <- 0 ;
         t.parent <- s1 ;
@@ -326,7 +326,7 @@ module Make (B : Context.A_DISK) = struct
     in
     let previous_generation = Sector.force_id t.current in
     let* queue =
-      let* queue = Queue.push_back queue [ previous_generation ] in
+      let* queue = Queue.push_back queue [ previous_generation, 1 ] in
       let* queue, to_flush_queue = Queue.self_allocate ~free_queue:queue in
       let+ () = flush to_flush_queue in
       queue

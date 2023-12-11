@@ -3,11 +3,12 @@ module Make (B : Context.A_DISK) = struct
   module Schema = Schema.Make (B)
 
   type t = Sector.t
+  type range = Sector.id * int
 
   type schema =
     { height : int Schema.field
     ; children : Schema.child Schema.dyn_array (* if height > 0 *)
-    ; free_sectors : Schema.id Schema.dyn_array (* if height = 0 *)
+    ; free_sectors : range Schema.field Schema.dyn_array (* if height = 0 *)
     }
 
   let ({ height; children; free_sectors } as schema) =
@@ -16,7 +17,7 @@ module Make (B : Context.A_DISK) = struct
     let open Schema.Syntax in
     let* height = Schema.uint8 in
     let| children = Schema.array Schema.child
-    and| free_sectors = Schema.array Schema.id in
+    and| free_sectors = Schema.(array (field_pair id uint32)) in
     { height; children; free_sectors }
 
   include struct
@@ -45,9 +46,9 @@ module Make (B : Context.A_DISK) = struct
 
   type push_back =
     | Ok_push
-    | Overflow of Sector.id list
+    | Overflow of range list
 
-  let rec do_push_back t (children : Sector.id list) =
+  let rec do_push_back t (children : range list) =
     assert (children <> []) ;
     let* h = height t in
     if h = 0
@@ -61,7 +62,7 @@ module Make (B : Context.A_DISK) = struct
         | children when i >= max_length ->
           let+ () = set_nb_free_sectors t i in
           Overflow children
-        | (child_ptr : Sector.id) :: children ->
+        | (child_ptr : range) :: children ->
           let* () = set_free_sector t i child_ptr in
           go (i + 1) children
       in
@@ -93,7 +94,7 @@ module Make (B : Context.A_DISK) = struct
       | Overflow children -> go (i + 1) children
     end
 
-  let rec push_back_list t children =
+  let rec push_back_list t (children : range list) =
     let* res = do_push_back t children in
     match res with
     | Ok_push -> Lwt_result.return t
@@ -158,23 +159,27 @@ module Make (B : Context.A_DISK) = struct
     let* h = height t in
     if h = 0
     then begin
-      let* len = nb_free_sectors t in
-      let stop = min len nb in
-      let rec go i acc =
-        if i >= stop
-        then Lwt_result.return acc
+      let* list_len = nb_free_sectors t in
+      let rec go i nb acc =
+        if i = list_len
+        then Lwt_result.return (nb, i, acc)
         else
-          let* child_ptr = get_free_sector t i in
-          go (i + 1) (child_ptr :: acc)
+          let* id, len = get_free_sector t i in
+          match nb with
+          | nb when nb = len -> Lwt_result.return (0, i + 1, (id, len) :: acc)
+          | nb when nb > len -> go (i + 1) (nb - len) ((id, len) :: acc)
+          | _ ->
+            let* () = set_free_sector t i (B.Id.add id nb, len - nb) in
+            Lwt_result.return (0, i, (id, nb) :: acc)
       in
-      let* acc = go 0 acc in
-      if len <= nb
+      let* nb_rest, i, acc = go 0 nb acc in
+      if nb_rest > 0
       then begin
         let+ () = set_nb_free_sectors t 0 in
-        acc, Underflow (nb - len)
+        acc, Underflow nb_rest
       end
       else begin
-        let+ () = shift_left t nb in
+        let+ () = shift_left t i in
         acc, Ok_pop
       end
     end
@@ -239,7 +244,7 @@ module Make (B : Context.A_DISK) = struct
     in
     assert (easy_alloc >= 0) ;
     let rest_alloc = quantity - easy_alloc in
-    let head = List.init easy_alloc (fun i -> B.Id.add free_start i) in
+    let head = [ free_start, easy_alloc ] in
     let+ free_queue, tail, quantity =
       if rest_alloc <= 0
       then Lwt_result.return (free_queue, [], 0L)
@@ -267,7 +272,7 @@ module Make (B : Context.A_DISK) = struct
     then Lwt_result.return (free_queue, [])
     else
       let* free_queue, allocated = pop_front free_queue count in
-      let+ to_flush, ids = Sector.finalize sector allocated in
+      let+ to_flush, ids = Sector.finalize sector (B.Diet.list_of_ranges allocated) in
       assert (ids = []) ;
       free_queue, to_flush
 
@@ -275,6 +280,7 @@ module Make (B : Context.A_DISK) = struct
     let rec alloc_queue allocated count free_queue =
       assert (count > 0) ;
       let* free_queue, new_allocated = pop_front free_queue count in
+      let new_allocated = B.Diet.list_of_ranges new_allocated in
       assert (List.length new_allocated = count) ;
       let allocated = List.rev_append new_allocated allocated in
       assert (B.acquire_discarded () = []) ;
@@ -287,8 +293,8 @@ module Make (B : Context.A_DISK) = struct
       else begin
         let rec give_back ~free_queue allocated_count = function
           | [] -> assert false
-          | id :: allocated ->
-            let* free_queue = push_back free_queue [ id ] in
+          | (id : Sector.id) :: (allocated : Sector.id list) ->
+            let* free_queue = push_back free_queue [ id, 1 ] in
             let allocated_count = allocated_count - 1 in
             let* new_count = count_new free_queue in
             if allocated_count = new_count

@@ -15,7 +15,7 @@ module Make (Id : S) = struct
 
   let add_range t (k, len) =
     let mlo =
-      match Diet.find_last (fun key -> Id.compare key (Id.add k (len - 1)) <= 0) t with
+      match Diet.find_last (fun key -> Id.compare key (Id.add k len) < 0) t with
       | mlk, mlv -> begin
         match Id.compare k (Id.add mlk mlv) with
         | 0 -> Some mlv
@@ -57,4 +57,19 @@ module Make (Id : S) = struct
     adding t l
 
   let to_range_list t = Diet.bindings t
+
+  let rec list_of_ranges l acc =
+    match l with
+    | [] -> acc
+    | (id, len) :: rest ->
+      let rec iter id n acc =
+        if n = len
+        then list_of_ranges rest acc
+        else (
+          let succ = Id.add id 1 in
+          iter succ (n + 1) (id :: acc))
+      in
+      iter id 0 acc
+
+  let list_of_ranges l = list_of_ranges l []
 end

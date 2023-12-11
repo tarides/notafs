@@ -15,4 +15,5 @@ module Make (Id : S) : sig
   val to_list : t -> Id.t list
   val of_list : Id.t list -> t
   val to_range_list : t -> (Id.t * int) list
+  val list_of_ranges : (Id.t * int) list -> Id.t list
 end
