@@ -47,7 +47,7 @@ module type A_DISK = sig
   val discard : Id.t -> unit
   val discard_range : Id.t * int -> unit
   val acquire_discarded : unit -> (Id.t * int) list
-  val allocator : (int -> (Id.t list, error) Lwt_result.t) ref
+  val allocator : (int -> ((Id.t * int) list, error) Lwt_result.t) ref
   val allocate : from:[ `Root | `Load ] -> unit -> (sector Lru.elt, error) Lwt_result.t
   val unallocate : sector Lru.elt -> unit
   val clear : unit -> (unit, error) Lwt_result.t
@@ -139,7 +139,7 @@ let of_impl
     let acquire_discarded () =
       let lst = Diet.to_range_list !discarded in
       discarded := Diet.empty ;
-      List.rev lst
+      lst
 
     let allocator = ref (fun _ -> failwith "no allocator")
     let lru = Lru.make ()
@@ -250,7 +250,6 @@ let of_impl
         | _ -> begin
           let nb = List.length acc in
           let* ids = !allocator nb in
-          let ids = Diet.to_range_list (Diet.of_list ids) in
           let acc =
             List.filter
               (fun (s, _, _) ->

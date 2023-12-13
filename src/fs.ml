@@ -118,7 +118,7 @@ module Make_disk (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) :
             let+ free_queue, allocated = Queue.pop_front t_free_queue required in
             assert (t.free_queue == t_free_queue) ;
             t.free_queue <- free_queue ;
-            B.Diet.list_of_ranges allocated) ;
+            allocated) ;
     t
 
   let format () =
