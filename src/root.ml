@@ -5,7 +5,7 @@ module Leaf (B : Context.A_DISK) : sig
 
   type t = Sector.t
   type 'a io := ('a, B.error) Lwt_result.t
-  type q := Sector.id * Sector.ptr * int64
+  type q := Sector.id * Sector.ptr * Sector.ptr * int64
 
   val get_free_queue : t -> q io
   val get_payload : t -> Sector.ptr io
@@ -32,11 +32,12 @@ end = struct
     ; generation : int64 Schema.field
     ; free_start : Sector.id Schema.field
     ; free_queue : Schema.ptr
+    ; bitset : Schema.ptr
     ; free_sectors : int64 Schema.field
     ; payload : Schema.ptr
     }
 
-  let { format_uid; generation; free_start; free_queue; free_sectors; payload } =
+  let { format_uid; generation; free_start; free_queue; free_sectors; bitset; payload } =
     Schema.define
     @@
     let open Schema.Syntax in
@@ -44,9 +45,10 @@ end = struct
     and+ generation = Schema.uint64
     and+ free_start = Schema.id
     and+ free_queue = Schema.ptr
+    and+ bitset = Schema.ptr
     and+ free_sectors = Schema.uint64
     and+ payload = Schema.ptr in
-    { format_uid; generation; free_start; free_queue; free_sectors; payload }
+    { format_uid; generation; free_start; free_queue; free_sectors; bitset; payload }
 
   include struct
     open Schema.Infix
@@ -59,6 +61,8 @@ end = struct
     let get_free_start t = t.@(free_start)
     let set_free_queue t v = t.@(free_queue) <- v
     let free_queue t = t.@(free_queue)
+    let set_free_bitset t v = t.@(bitset) <- v
+    let free_bitset t = t.@(bitset)
     let set_free_sectors t v = t.@(free_sectors) <- v
     let free_sectors t = t.@(free_sectors)
     let get_payload t = t.@(payload)
@@ -68,17 +72,19 @@ end = struct
   let get_free_queue t =
     let* queue = free_queue t in
     let* free_start = get_free_start t in
+    let* bitset = free_bitset t in
     let+ free_sectors = free_sectors t in
-    free_start, queue, free_sectors
+    free_start, queue, bitset, free_sectors
 
   let get_format_uid t = format_uid t
 
-  let create ~format_uid ~gen ~at (free_start, free_queue, free_sectors) payload =
+  let create ~format_uid ~gen ~at (free_start, free_queue, bitset, free_sectors) payload =
     let* s = Sector.create ~at:(Sector.root_loc at) () in
     let* () = set_format_uid s format_uid in
     let* () = set_generation s gen in
     let* () = set_free_start s free_start in
     let* () = set_free_queue s free_queue in
+    let* () = set_free_bitset s bitset in
     let* () = set_free_sectors s free_sectors in
     let+ () = set_payload s payload in
     s
@@ -268,7 +274,7 @@ module Make (B : Context.A_DISK) = struct
         ~format_uid
         ~gen:Int64.one
         ~at
-        (free_start, Sector.null_ptr, free_sectors)
+        (free_start, Sector.null_ptr, Sector.null_ptr, free_sectors)
         Sector.null_ptr
     in
     let rec write_all = function
@@ -333,6 +339,7 @@ module Make (B : Context.A_DISK) = struct
     in
     let { Queue.free_start = new_free_start
         ; free_queue = new_free_root
+        ; bitset = new_bitset
         ; free_sectors = new_free_sectors
         }
       =
@@ -344,7 +351,7 @@ module Make (B : Context.A_DISK) = struct
         ~format_uid:t.format_uid
         ~gen:t.generation
         ~at
-        (new_free_start, Sector.to_ptr new_free_root, new_free_sectors)
+        (new_free_start, Sector.to_ptr new_free_root, Sector.to_ptr new_bitset, new_free_sectors)
         (Sector.to_ptr payload)
     in
     t.current <- current ;

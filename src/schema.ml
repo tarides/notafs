@@ -100,4 +100,5 @@ module Make (B : Context.A_DISK) = struct
   type ptr = (Sector.ptr, Sector.ptr) bifield
 
   let ptr : ptr t = make Sector.ptr_size Sector.get_child_ptr Sector.set_child_ptr
+  type uint8 = char field
 end
