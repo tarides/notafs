@@ -145,6 +145,7 @@ module Make_disk (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) :
         let t_free_queue = t.free_queue in
         let* free_queue = Queue.push_discarded t.free_queue in
         let* free_queue, allocated = Queue.pop_front free_queue required in
+        let allocated = B.Diet.list_of_ranges allocated in
         assert (List.length allocated = required) ;
         let* free_queue, to_flush_queue = Queue.self_allocate ~free_queue in
         let* payload_root, to_flush, allocated = Files.to_payload t.files allocated in

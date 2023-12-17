@@ -1,13 +1,25 @@
 module Make (B : Context.A_DISK) = struct
   module Sector = Sector.Make (B)
 
-  type ('set, 'get) bifield =
-    { get : Sector.t -> ('get, B.error) Lwt_result.t
-    ; set : Sector.t -> 'set -> (unit, B.error) Lwt_result.t
+  type 'a field =
+    { get : Sector.t -> ('a, B.error) Lwt_result.t
+    ; set : Sector.t -> 'a -> (unit, B.error) Lwt_result.t
     }
   (* let bifield_map f g t = { get = (fun s -> f (t.get s)); set = (fun s x -> t.set s (g x)) } *)
 
-  type 'a field = ('a, 'a) bifield
+  let bifield_pair x y =
+    let open Lwt_result.Syntax in
+    { get =
+        (fun s ->
+          let* a = x.get s in
+          let+ b = y.get s in
+          a, b)
+    ; set =
+        (fun s (a, b) ->
+          let* () = x.set s a in
+          let+ () = y.set s b in
+          ())
+    }
 
   module Infix = struct
     let ( .@() ) t i = i.get t
@@ -52,6 +64,11 @@ module Make (B : Context.A_DISK) = struct
       max a_ofs b_ofs, (a, b)
   end
 
+  let field_pair x y ~max_size ofs =
+    let ofs, x = x ~max_size ofs in
+    let ofs, y = y ~max_size ofs in
+    ofs, bifield_pair x y
+
   let make size get set : 'a t =
     fun ~max_size:_ ofs ->
     ofs + size, { get = (fun cs -> get cs ofs); set = (fun cs v -> set cs ofs v) }
@@ -89,15 +106,15 @@ module Make (B : Context.A_DISK) = struct
     let _, t = array.thing ~max_size:0 (array.location + (array.size_of_thing * i)) in
     t
 
-  type child = (Sector.t, Sector.t) bifield
+  type child = Sector.t field
 
   let child : child t = make Sector.ptr_size Sector.get_child Sector.set_child
 
-  type id = (Sector.id, Sector.id) bifield
+  type id = Sector.id field
 
   let id : id t = make Sector.id_size Sector.read_id Sector.write_id
 
-  type ptr = (Sector.ptr, Sector.ptr) bifield
+  type ptr = Sector.ptr field
 
   let ptr : ptr t = make Sector.ptr_size Sector.get_child_ptr Sector.set_child_ptr
   type uint8 = char field

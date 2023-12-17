@@ -19,8 +19,7 @@ module No_checksum : CHECKSUM
 (** The [Notafs] library provides two entry points, depending on your needs:
     - {!KV}, a simple key-value implementation, which follows the {!Mirage_kv} signatures.
       It should be the best entry point for anyone wishing to use [Notafs] alongside MirageOS.
-    - {!FS}, a lower-level implementation, with a more usual file system approach.
-*)
+    - {!FS}, a lower-level implementation, with a more usual file system approach. *)
 
 (** {2:store-kv KV, hierarchical Key-Value store} *)
 
@@ -193,5 +192,4 @@ val get_config
     Otherwise, returns the error [`Disk_not_formatted].
 
     After formatting a disk, it is not possible to resize the block device,
-    change its page size, or switch to a different checksum algorithm.
-*)
+    change its page size, or switch to a different checksum algorithm. *)

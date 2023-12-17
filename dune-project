@@ -17,6 +17,7 @@
     checkseum
     mirage-block
     (mirage-kv (>= "6.1.1"))
+    mirage-clock
     optint
     repr
     ppx_repr
