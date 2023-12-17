@@ -274,20 +274,14 @@ module Make (B : Context.A_DISK) = struct
       ; free_sectors = Int64.sub free_sectors quantity
       }
     in
-    List.iter (fun i -> Format.printf "Head Id: %d@."  (Int64.to_int @@ B.Id.to_int64 i)) head;
-    List.iter (fun i -> Format.printf "Tail Id: %d@."  (Int64.to_int @@ B.Id.to_int64 i)) tail;
     q, head @ tail
 
   let pop_front t quantity =
     let* q, lst = pop_front t quantity in
     let rec use = function
       | a :: b ->
-        (Format.printf "I am trying to use this: %d @." (Int64.to_int @@ B.Id.to_int64 a);
-        if Int64.to_int (B.Id.to_int64 a) = 0
-        then ( use b)
-        else
-          let* () = Bitset.use q.bitset (Int64.to_int (B.Id.to_int64 a)) in
-          use b)
+        let* () = Bitset.use q.bitset (Int64.to_int (B.Id.to_int64 a)) in
+        use b
       | [] -> Lwt_result.return ()
     in
     let+ () = use lst in
@@ -299,10 +293,10 @@ module Make (B : Context.A_DISK) = struct
     bitset_size + queue_size
 
   let finalize { free_start = f; free_queue = q; bitset; free_sectors } ids =
-    let* _, rest = Sector.finalize q ids in
-    let+ ts, rest = Sector.finalize bitset rest in
+    let* tsqueue, rest = Sector.finalize q ids in
+    let+ tsbitset, rest = Sector.finalize bitset rest in
     assert (rest = []) ;
-    { free_start = f; free_queue = q; bitset; free_sectors }, ts
+    { free_start = f; free_queue = q; bitset; free_sectors }, tsqueue @ tsbitset
 
   let allocate ~free_queue sector =
     let* count = Sector.count_new sector in

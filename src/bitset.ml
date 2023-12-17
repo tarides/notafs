@@ -15,30 +15,23 @@ module Make (B : Context.A_DISK) = struct
 
   let free t i =
     let pos = i / 8 in
-    if true then Format.printf "Sector %d being freed@." i ;
     let* value = Sector.get_uint8 t pos in
     let offset = i mod 8 in
     let flag = value land (1 lsl offset) in
-    (* Format.printf "Value %d Flag %d@." value flag; *)
     assert (flag > 0) ;
     let update = value lxor (1 lsl offset) in
-    if pos = 0 then Format.printf "Value %d; Update %d; Flag %d@." value update flag ;
     Sector.set_uint8 t pos update
 
   let use t i =
     let pos = i / 8 in
-    if true then Format.printf "Sector %d being used@." i ;
     let* value = Sector.get_uint8 t pos in
     let offset = i mod 8 in
     let flag = value land (1 lsl offset) in
     assert (flag = 0) ;
     let update = value lor (1 lsl offset) in
-    if pos = 0 then Format.printf "Value %d; Update %d; Flag %d@." value update flag ;
-    (* Format.printf "Value %d Flag %d Offset %d Update %d@." value flag offset update; *)
     Sector.set_uint8 t pos update
 
   let create () =
-    Format.printf "create ;) @." ;
     let* t = Sector.create () in
     let sz = B.page_size in
     let rec init = function
