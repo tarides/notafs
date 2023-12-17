@@ -129,7 +129,7 @@ module Make (B : Context.A_DISK) = struct
   let rec push_discarded ~quantity t bitset =
     let rec free = function
       | a :: b ->
-        let* () = Bitset.free bitset (Int64.to_int (B.Id.to_int64 a)) in
+        let* () = Bitset.free_range bitset a in
         free b
       | [] -> Lwt_result.return ()
     in
@@ -238,7 +238,7 @@ module Make (B : Context.A_DISK) = struct
   let push_back { free_start; free_queue; bitset; free_sectors } lst =
     let rec free = function
       | a :: b ->
-        let* () = Bitset.free bitset (Int64.to_int (B.Id.to_int64 a)) in
+        let* () = Bitset.free_range bitset a in
         free b
       | [] -> Lwt_result.return ()
     in
@@ -285,7 +285,7 @@ module Make (B : Context.A_DISK) = struct
     let* q, lst = pop_front t quantity in
     let rec use = function
       | a :: b ->
-        let* () = Bitset.use q.bitset (Int64.to_int (B.Id.to_int64 a)) in
+        let* () = Bitset.use_range q.bitset a in
         use b
       | [] -> Lwt_result.return ()
     in
