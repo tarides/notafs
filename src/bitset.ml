@@ -13,7 +13,7 @@ module Make (B : Context.A_DISK) = struct
     let flag = value land (1 lsl offset) in
     Lwt_result.return (flag = 0)
 
-  let free t i =
+  let free_leaf t i =
     let pos = i / 8 in
     let* value = Sector.get_uint8 t pos in
     let offset = i mod 8 in
@@ -21,6 +21,21 @@ module Make (B : Context.A_DISK) = struct
     assert (flag > 0) ;
     let update = value lxor (1 lsl offset) in
     Sector.set_uint8 t pos update
+
+  let free t i =
+    (* Format.printf "Freeing %d@." i; *)
+    let page_size = B.page_size in
+    let rec reach_leaf t i ind =
+      let pos = i / page_size in
+      if pos < page_size - 1
+      then
+        let* child = Sector.get_child t pos in
+        free_leaf child ind
+      else
+        let* child = Sector.get_child t pos in
+        reach_leaf child pos ind
+    in
+    reach_leaf t i (i mod page_size)
 
   (* TODO: Optimize free_range to use less set_uint calls *)
   let rec free_range t (id, len) =
@@ -31,7 +46,7 @@ module Make (B : Context.A_DISK) = struct
       let* () = free t int_id in
       free_range t (B.Id.succ id, len - 1))
 
-  let use t i =
+  let use_leaf t i =
     let pos = i / 8 in
     let* value = Sector.get_uint8 t pos in
     let offset = i mod 8 in
@@ -39,6 +54,21 @@ module Make (B : Context.A_DISK) = struct
     assert (flag = 0) ;
     let update = value lor (1 lsl offset) in
     Sector.set_uint8 t pos update
+
+  let use t i =
+    (* Format.printf "Using %d@." i; *)
+    let page_size = B.page_size in
+    let rec reach_leaf t i ind =
+      let pos = i / page_size in
+      if pos < page_size - 1
+      then
+        let* child = Sector.get_child t pos in
+        use_leaf child ind
+      else
+        let* child = Sector.get_child t pos in
+        reach_leaf child pos ind
+    in
+    reach_leaf t i (i mod page_size)
 
   (* TODO: Optimize use_range to use less set_uint calls *)
   let rec use_range t (id, len) =
@@ -49,7 +79,7 @@ module Make (B : Context.A_DISK) = struct
       let* () = use t int_id in
       use_range t (B.Id.succ id, len - 1))
 
-  let create () =
+  let create_leaf () =
     let* t = Sector.create () in
     let sz = B.page_size in
     let rec init = function
@@ -58,13 +88,36 @@ module Make (B : Context.A_DISK) = struct
         let* () = Sector.set_uint8 t i 0 in
         init (i + 1)
     in
-    let rec init_reserved = function
-      | i when i < 0 -> Lwt_result.return ()
-      | i ->
-        let* () = use t i in
-        init_reserved (i - 1)
-    in
-    let* () = init 0 in
-    let+ () = init_reserved 12 in
+    let+ () = init 0 in
     t
+
+  let rec create_parent size length =
+    let* t = Sector.create () in
+    let rec loop = function
+      | pos when pos < 0 -> Lwt_result.return ()
+      | pos when pos >= length - 1 ->
+        let* parent = create_parent pos length in
+        let* () = Sector.set_child t pos parent in
+        loop (length - 2)
+      | pos ->
+        let* leaf = create_leaf () in
+        let* () = Sector.set_child t pos leaf in
+        loop (pos - 1)
+    in
+    let pos = size / length in
+    let+ () = loop pos in
+    t
+
+  let create () =
+    let nb_sectors = Int64.to_int B.nb_sectors in
+    let page_size = B.page_size in
+    let* root = create_parent nb_sectors page_size in
+    let rec init_res = function
+      | num when num < 0 -> Lwt_result.return ()
+      | num ->
+        let* () = use root num in
+        init_res (num - 1)
+    in
+    let+ () = init_res 12 in
+    root
 end

@@ -300,6 +300,7 @@ module Make (B : Context.A_DISK) = struct
   let finalize { free_start = f; free_queue = q; bitset; free_sectors } ids =
     let* tsqueue, rest = Sector.finalize q ids in
     let+ tsbitset, rest = Sector.finalize bitset rest in
+    (* List.iter (fun (id, _) -> Format.printf "Bitset at %d@." (Int64.to_int @@ B.Id.to_int64 id)) tsbitset; *)
     assert (rest = []) ;
     { free_start = f; free_queue = q; bitset; free_sectors }, tsqueue @ tsbitset
 
