@@ -93,7 +93,9 @@ module Make (B : Context.A_DISK) = struct
 
   let rec create_parent size length =
     let* t = Sector.create () in
-    let rec loop = function
+    let rec loop pos =
+      Format.printf "Looping over position %d@." pos; 
+      match pos with 
       | pos when pos < 0 -> Lwt_result.return ()
       | pos when pos >= length - 1 ->
         let* parent = create_parent pos length in
@@ -111,7 +113,9 @@ module Make (B : Context.A_DISK) = struct
   let create () =
     let nb_sectors = Int64.to_int B.nb_sectors in
     let page_size = B.page_size in
+    Format.printf "size: %d, number: %d@." page_size nb_sectors;
     let* root = create_parent nb_sectors page_size in
+    Format.printf "Root done@.";
     let rec init_res = function
       | num when num < 0 -> Lwt_result.return ()
       | num ->
@@ -119,5 +123,6 @@ module Make (B : Context.A_DISK) = struct
         init_res (num - 1)
     in
     let+ () = init_res 12 in
+    Format.printf "Create done@.";
     root
 end
