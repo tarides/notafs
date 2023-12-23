@@ -281,15 +281,16 @@ module Make (B : Context.A_DISK) = struct
     in
     q, head @ tail
 
-  let pop_front t quantity =
-    let* q, lst = pop_front t quantity in
+  let pop_front q quantity =
+    let* q, lst = pop_front q quantity in
     let rec use = function
       | a :: b ->
         let* () = Bitset.use_range q.bitset a in
         use b
       | [] -> Lwt_result.return ()
     in
-    let+ () = use lst in
+    let* () = use lst in
+    let+ q = push_discarded q in 
     q, lst
 
   let count_new { free_queue = q; bitset = b; _ } =
