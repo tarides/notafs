@@ -181,12 +181,13 @@ module Make (B : Context.A_DISK) = struct
             Lwt_result.return (0, i, (id, nb) :: acc)
       in
       let* nb_rest, i, acc = go 0 nb acc in
-      if nb_rest > 0
+      if i >= list_len
       then begin
         let+ () = set_nb_free_sectors t 0 in
         acc, Underflow nb_rest
       end
       else begin
+        assert (nb_rest = 0) ;
         let+ () = shift_left t i in
         acc, Ok_pop
       end
