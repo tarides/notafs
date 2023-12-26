@@ -245,11 +245,14 @@ module Make (B : Context.A_DISK) = struct
     in
     let* () = free lst in
     let* free_queue = push_back_list free_queue lst in
-    let+ free_queue, nb = push_discarded free_queue bitset in
+    let* free_queue, nb = push_discarded free_queue bitset in
+    let+ _, _, rem = 
+    if Int64.to_int free_sectors > 40 then 
+      pop_front free_queue bitset 2 else Lwt_result.return (free_queue,[],Int64.of_int 0) in
     { free_start
     ; free_queue
     ; bitset
-    ; free_sectors = Int64.add free_sectors (Int64.of_int (nb + List.length lst))
+    ; free_sectors = Int64.add free_sectors (Int64.of_int (nb + List.length lst - Int64.to_int rem))
     }
 
   let push_discarded { free_start; free_queue; bitset; free_sectors } =
@@ -283,7 +286,8 @@ module Make (B : Context.A_DISK) = struct
     q, head @ tail
 
   let pop_front q quantity =
-    let* q, lst = pop_front q quantity in
+    let _ = pop_front in (* just so that pop_front is being used somewhere *)
+    let* lst = Bitset.pop_front q.bitset quantity in 
     let rec use = function
       | a :: b ->
         let* () = Bitset.use_range q.bitset a in

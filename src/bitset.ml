@@ -11,7 +11,7 @@ module Make (B : Context.A_DISK) = struct
   let get_nb_leaves () =
     let nb_sectors = Int64.to_int B.nb_sectors in
     let page_size = get_page_size () in
-    let bit_size = page_size * 8 in
+    let bit_size = page_size in
     (nb_sectors + bit_size - 1) / bit_size
 
   let get_group_size nb_children nb_leaves =
@@ -31,16 +31,18 @@ module Make (B : Context.A_DISK) = struct
     let incr = get_ptr_size () in
     page_size / incr
 
-  let get t i =
+  let get value offset = value land (1 lsl offset)
+
+  let get_flag t i =
     let pos = i / 8 in
     let* value = Sector.get_uint8 t pos in
     let offset = i mod 8 in
-    let flag = value land (1 lsl offset) in
-    Lwt_result.return (flag = 0)
+    let flag = get value offset in
+    Lwt_result.return flag
 
   let get_leaf t i =
     let page_size = get_page_size () in
-    let bit_size = page_size * 8 in
+    let bit_size = page_size in
     let leaf_ind = i / bit_size in
     let nb_leaves = get_nb_leaves () in
     let nb_children = get_nb_children page_size in
@@ -48,12 +50,12 @@ module Make (B : Context.A_DISK) = struct
     let rec reach_leaf t leaf_ind nb_leaves =
       let group_size = get_group_size nb_children nb_leaves in
       let child_ind = leaf_ind / group_size in
-      let* child = Sector.get_child t (incr * child_ind) in
       let new_leaves =
         if child_ind = (nb_leaves - 1) / group_size
         then ((nb_leaves - 1) mod group_size) + 1
         else group_size
       in
+      let* child = Sector.get_child t (incr * child_ind) in
       if group_size = 1
       then Lwt_result.return child
       else reach_leaf child (leaf_ind mod group_size) new_leaves
@@ -71,7 +73,7 @@ module Make (B : Context.A_DISK) = struct
 
   let free t i =
     let page_size = get_page_size () in
-    let bit_size = page_size * 8 in
+    let bit_size = page_size in
     let* leaf = get_leaf t i in
     free_leaf leaf (i mod bit_size)
 
@@ -95,7 +97,7 @@ module Make (B : Context.A_DISK) = struct
 
   let use t i =
     let page_size = get_page_size () in
-    let bit_size = page_size * 8 in
+    let bit_size = page_size in
     let* leaf = get_leaf t i in
     use_leaf leaf (i mod bit_size)
 
@@ -110,7 +112,7 @@ module Make (B : Context.A_DISK) = struct
 
   let create_leaf () =
     let* t = Sector.create () in
-    let sz = get_page_size () in
+    let sz = B.page_size in
     let rec init = function
       | i when i >= sz -> Lwt_result.return ()
       | i ->
@@ -160,4 +162,48 @@ module Make (B : Context.A_DISK) = struct
     in
     let+ () = init_res 12 in
     root
+
+  let pop_front t quantity =
+    let page_size = get_page_size () in
+    let bit_size = page_size in
+    let rec do_pop_front ind lst leaf =
+      assert (List.length lst < quantity) ;
+      let* leaf =
+        if ind mod bit_size = 0 then get_leaf t ind else Lwt_result.return leaf
+      in
+      let pos = ind mod bit_size / 8 in
+      let* value = Sector.get_uint8 leaf pos in
+      if value = 255
+      then do_pop_front (ind + 8) lst leaf
+      else (
+        let needed = quantity - List.length lst in
+        let rec get_id cur_ind needed lst =
+          if cur_ind = ind + 8 || needed = 0
+          then lst
+          else (
+            let flag = get value (cur_ind mod 8) in
+            if flag = 0
+            then get_id (cur_ind + 1) (needed - 1) (cur_ind :: lst)
+            else get_id (cur_ind + 1) needed lst)
+        in
+        let lst = get_id ind needed lst in
+        if List.length lst = quantity
+        then Lwt_result.return lst
+        else do_pop_front (ind + 8) lst leaf)
+    in
+    let* lst = do_pop_front 0 [] t in
+    let rec get_range_list cur  =  function 
+    | id::res ->
+      (match cur with 
+      | (top, range)::rest_cur ->
+        if top + range = id then 
+          get_range_list ((top, range + 1)::rest_cur) res 
+        else
+          get_range_list ((id, 1)::cur) res
+        | [] -> get_range_list [(id, 1)] res)
+    | [] -> cur
+    in
+    let lst = get_range_list [] lst in
+    let lst = List.map (fun (id,range) -> B.Id.of_int id, range) lst in 
+    Lwt_result.return lst
 end
