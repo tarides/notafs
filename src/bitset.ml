@@ -185,29 +185,22 @@ module Make (B : Context.A_DISK) = struct
       in
       let lst = get_id ind needed lst in
       if List.length lst = quantity
-      then Lwt_result.return (List.nth lst 0 , lst)
+      then Lwt_result.return (List.nth lst 0, lst)
       else if ind < start_ind && ind + 8 >= start_ind
-      then (
-        Format.printf "wait %d %d %d@." ind start_ind quantity;
-        Lwt_result.fail `Disk_is_full)
-      else
+      then Lwt_result.fail `Disk_is_full
+      else (
+        let new_ind = if ind + 8 >= nb_sectors then 0 else ind + 8 in
         let* leaf =
-          if ind / bit_size <> (ind + 8) / bit_size
-          then get_leaf t ind
+          if ind / bit_size <> new_ind / bit_size
+          then get_leaf t new_ind
           else Lwt_result.return leaf
         in
-        if ind + 8 >= nb_sectors
-        then do_pop_front 0 lst leaf
-        else do_pop_front (ind + 8) lst leaf
+        do_pop_front new_ind lst leaf)
     in
     let* start_leaf = get_leaf t start_ind in
     let* end_ind, lst = do_pop_front start_ind [] start_leaf in
-    let lst = List.rev lst in 
-    let* () =
-      if end_ind >= nb_sectors
-      then Sector.set_uint32 t (page_size - 4) 0
-      else Sector.set_uint32 t (page_size - 4) end_ind
-    in
+    let lst = List.rev lst in
+    let* () = Sector.set_uint32 t (page_size - 4) end_ind in
     let rec get_range_list cur = function
       | id :: res ->
         (match cur with
