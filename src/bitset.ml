@@ -22,14 +22,11 @@ module Make (B : Context.A_DISK) = struct
     in
     get_group_size 1
 
-  let get_ptr_size () =
-    let pointer_size = Sector.ptr_size in
-    let id_size = Sector.id_size in
-    ((pointer_size + id_size) / 8) + 8
+  let get_ptr_size () = Sector.ptr_size
 
   let get_nb_children page_size =
     let incr = get_ptr_size () in
-    (page_size - 4) / incr (* 4 bytes for the sector id*)
+    page_size / incr
 
   let get value offset = value land (1 lsl offset)
 
@@ -163,11 +160,11 @@ module Make (B : Context.A_DISK) = struct
     let+ () = init_res 12 in
     root
 
-  let pop_front t quantity =
+  let pop_front t bitset_start quantity =
     let page_size = get_page_size () in
     let bit_size = page_size * 8 in
     let nb_sectors = Int64.to_int B.nb_sectors in
-    let* start_ind = Sector.get_uint32 t (page_size - 4) in
+    let start_ind = Int64.to_int @@ B.Id.to_int64 bitset_start in
     let start_ind = start_ind - (start_ind mod 8) in
     let rec do_pop_front ind lst leaf =
       assert (List.length lst < quantity) ;
@@ -198,9 +195,9 @@ module Make (B : Context.A_DISK) = struct
         do_pop_front new_ind lst leaf)
     in
     let* start_leaf = get_leaf t start_ind in
-    let* end_ind, lst = do_pop_front start_ind [] start_leaf in
+    let* new_bitset_start, lst = do_pop_front start_ind [] start_leaf in
+    let new_bitset_start = B.Id.of_int new_bitset_start in
     let lst = List.rev lst in
-    let* () = Sector.set_uint32 t (page_size - 4) end_ind in
     let rec get_range_list cur = function
       | id :: res ->
         (match cur with
@@ -213,5 +210,5 @@ module Make (B : Context.A_DISK) = struct
     in
     let lst = get_range_list [] lst in
     let lst = List.map (fun (id, range) -> B.Id.of_int id, range) lst in
-    Lwt_result.return lst
+    Lwt_result.return (lst, new_bitset_start)
 end

@@ -7,12 +7,13 @@ module Make (B : Context.A_DISK) : sig
     { free_start : Sector.id
     ; free_queue : Sector.t
     ; bitset : Sector.t
+    ; bitset_start : Sector.id
     ; free_sectors : Int64.t
     }
 
   type 'a r := ('a, B.error) Lwt_result.t
 
-  val load : Sector.id * Sector.ptr * Sector.ptr * Int64.t -> q r
+  val load : Sector.id * Sector.ptr * Sector.ptr * Sector.id * Int64.t -> q r
   val verify_checksum : q -> unit r
   val push_back : q -> range list -> q r
   val push_discarded : q -> q r
