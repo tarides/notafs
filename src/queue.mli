@@ -17,6 +17,7 @@ module Make (B : Context.A_DISK) : sig
   val verify_checksum : q -> unit r
   val push_back : q -> range list -> q r
   val push_discarded : q -> q r
+  val pop_old_generation : q -> range  -> q r
   val pop_front : q -> int -> (q * range list) r
   val finalize : q -> Sector.id list -> (q * (Sector.id * Cstruct.t) list) r
   val allocate : free_queue:q -> Sector.t -> (q * (Sector.id * Cstruct.t) list) r

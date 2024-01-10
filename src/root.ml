@@ -362,6 +362,15 @@ module Make (B : Context.A_DISK) = struct
     in
     let previous_generation = Sector.force_id t.current in
     let* queue =
+      let old_generation = 4 in
+      if Int64.to_int t.generation > old_generation
+      then (
+        let gen = B.Id.of_int (Int64.to_int B.nb_sectors + 1) in
+        Queue.pop_old_generation queue (gen, 1))
+      else Lwt_result.return queue
+    in
+    let* queue =
+      let* queue = Queue.push_back queue [ B.Id.of_int (Int64.to_int B.nb_sectors + 1), 1 ] in
       let* queue = Queue.push_back queue [ previous_generation, 1 ] in
       let* queue, to_flush_queue = Queue.self_allocate ~free_queue:queue in
       let+ () = flush to_flush_queue in

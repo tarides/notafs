@@ -127,17 +127,10 @@ module Make (B : Context.A_DISK) = struct
     size ptr
 
   let rec push_discarded ~quantity t bitset =
-    let rec free = function
-      | a :: b ->
-        let* () = Bitset.free_range bitset a in
-        free b
-      | [] -> Lwt_result.return ()
-    in
     match B.acquire_discarded () with
     | [] -> Lwt_result.return (t, quantity)
     | lst ->
       let* t = push_back_list t lst in
-      let* () = free lst in
       push_discarded ~quantity:(quantity + List.length lst) t bitset
 
   let push_discarded t = push_discarded ~quantity:0 t
@@ -238,26 +231,13 @@ module Make (B : Context.A_DISK) = struct
     }
 
   let push_back { free_start; free_queue; bitset; bitset_start; free_sectors } lst =
-    let rec free = function
-      | a :: b ->
-        let* () = Bitset.free_range bitset a in
-        free b
-      | [] -> Lwt_result.return ()
-    in
-    let* () = free lst in
     let* free_queue = push_back_list free_queue lst in
-    let* free_queue, nb = push_discarded free_queue bitset in
-    let+ _, _, rem =
-      if Int64.to_int free_sectors > 40
-      then pop_front free_queue bitset 2
-      else Lwt_result.return (free_queue, [], Int64.of_int 0)
-    in
+    let+ free_queue, nb = push_discarded free_queue bitset in
     { free_start
     ; free_queue
     ; bitset
     ; bitset_start
-    ; free_sectors =
-        Int64.add free_sectors (Int64.of_int (nb + List.length lst - Int64.to_int rem))
+    ; free_sectors = Int64.add free_sectors (Int64.of_int (nb + List.length lst))
     }
 
   let push_discarded { free_start; free_queue; bitset; bitset_start; free_sectors } =
@@ -268,6 +248,20 @@ module Make (B : Context.A_DISK) = struct
     ; bitset_start
     ; free_sectors = Int64.add free_sectors (Int64.of_int nb)
     }
+
+  let pop_old_generation q last_gen_id =
+    let rec pop queue =
+      let* queue, lst, _ = pop_front queue q.bitset 1 in
+      let range = List.nth lst 0 
+      in
+      if range = last_gen_id
+      then Lwt_result.return queue
+      else
+        let* () = Bitset.free_range q.bitset range in
+        pop queue
+    in
+    let+ queue = pop q.free_queue in 
+    {q with free_queue = queue}
 
   let pop_front { free_start; free_queue; bitset; bitset_start; free_sectors } quantity =
     let easy_alloc =
@@ -314,7 +308,6 @@ module Make (B : Context.A_DISK) = struct
   let finalize { free_start = f; free_queue = q; bitset; bitset_start; free_sectors } ids =
     let* tsqueue, rest = Sector.finalize q ids in
     let+ tsbitset, rest = Sector.finalize bitset rest in
-    (* List.iter (fun (id, _) -> Format.printf "Bitset at %d@." (Int64.to_int @@ B.Id.to_int64 id)) tsbitset; *)
     assert (rest = []) ;
     ( { free_start = f; free_queue = q; bitset; bitset_start; free_sectors }
     , tsqueue @ tsbitset )
