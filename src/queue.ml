@@ -1,6 +1,7 @@
 module Make (B : Context.A_DISK) = struct
   module Sector = Sector.Make (B)
   module Schema = Schema.Make (B)
+  module Bitset = Bitset.Make (B)
 
   type t = Sector.t
   type range = Sector.id * int
@@ -125,12 +126,12 @@ module Make (B : Context.A_DISK) = struct
     in
     size ptr
 
-  let rec push_discarded ~quantity t =
+  let rec push_discarded ~quantity t bitset =
     match B.acquire_discarded () with
     | [] -> Lwt_result.return (t, quantity)
     | lst ->
       let* t = push_back_list t lst in
-      push_discarded ~quantity:(quantity + List.length lst) t
+      push_discarded ~quantity:(quantity + List.length lst) t bitset
 
   let push_discarded t = push_discarded ~quantity:0 t
 
@@ -214,9 +215,9 @@ module Make (B : Context.A_DISK) = struct
       go 0 nb acc
     end
 
-  let pop_front t nb =
+  let pop_front t bitset nb =
     let* acc, res = do_pop_front t nb [] in
-    let* t, nb_discarded = push_discarded t in
+    let* t, nb_discarded = push_discarded t bitset in
     match res with
     | Ok_pop -> Lwt_result.return (t, acc, Int64.of_int (nb - nb_discarded))
     | Underflow _ -> Lwt_result.fail `Disk_is_full
@@ -224,22 +225,44 @@ module Make (B : Context.A_DISK) = struct
   type q =
     { free_start : Sector.id
     ; free_queue : t
+    ; bitset : Bitset.t
+    ; bitset_start : Sector.id
     ; free_sectors : Int64.t
     }
 
-  let push_back { free_start; free_queue; free_sectors } lst =
+  let push_back { free_start; free_queue; bitset; bitset_start; free_sectors } lst =
     let* free_queue = push_back_list free_queue lst in
-    let+ free_queue, nb = push_discarded free_queue in
+    let+ free_queue, nb = push_discarded free_queue bitset in
     { free_start
     ; free_queue
+    ; bitset
+    ; bitset_start
     ; free_sectors = Int64.add free_sectors (Int64.of_int (nb + List.length lst))
     }
 
-  let push_discarded { free_start; free_queue; free_sectors } =
-    let+ free_queue, nb = push_discarded free_queue in
-    { free_start; free_queue; free_sectors = Int64.add free_sectors (Int64.of_int nb) }
+  let push_discarded { free_start; free_queue; bitset; bitset_start; free_sectors } =
+    let+ free_queue, nb = push_discarded free_queue bitset in
+    { free_start
+    ; free_queue
+    ; bitset
+    ; bitset_start
+    ; free_sectors = Int64.add free_sectors (Int64.of_int nb)
+    }
 
-  let pop_front { free_start; free_queue; free_sectors } quantity =
+  let pop_old_generation q last_gen_id =
+    let rec pop queue =
+      let* queue, lst, _ = pop_front queue q.bitset 1 in
+      let range = List.nth lst 0 in
+      if range = last_gen_id
+      then Lwt_result.return queue
+      else
+        let* () = Bitset.free_range q.bitset range in
+        pop queue
+    in
+    let+ queue = pop q.free_queue in
+    { q with free_queue = queue }
+
+  let pop_front { free_start; free_queue; bitset; bitset_start; free_sectors } quantity =
     let easy_alloc =
       min quantity Int64.(to_int (sub B.nb_sectors (B.Id.to_int64 free_start)))
     in
@@ -249,23 +272,37 @@ module Make (B : Context.A_DISK) = struct
     let+ free_queue, tail, quantity =
       if rest_alloc <= 0
       then Lwt_result.return (free_queue, [], 0L)
-      else pop_front free_queue rest_alloc
+      else pop_front free_queue bitset rest_alloc
     in
     let quantity = Int64.add quantity (Int64.of_int easy_alloc) in
     let q =
       { free_start = B.Id.add free_start easy_alloc
       ; free_queue
+      ; bitset
+      ; bitset_start
       ; free_sectors = Int64.sub free_sectors quantity
       }
     in
     q, head @ tail
 
-  let count_new { free_queue = q; _ } = Sector.count_new q
+  let pop_front q quantity =
+    let _ = pop_front in
+    (* just so that pop_front is being used somewhere *)
+    let* lst, new_bitset_start = Bitset.pop_front q.bitset q.bitset_start quantity in
+    let+ q = push_discarded q in
+    { q with bitset_start = new_bitset_start }, lst
 
-  let finalize { free_start = f; free_queue = q; free_sectors } ids =
-    let+ ts, rest = Sector.finalize q ids in
+  let count_new { free_queue = q; bitset = b; _ } =
+    let* bitset_size = Sector.count_new b in
+    let+ queue_size = Sector.count_new q in
+    bitset_size + queue_size
+
+  let finalize { free_start = f; free_queue = q; bitset; bitset_start; free_sectors } ids =
+    let* tsqueue, rest = Sector.finalize q ids in
+    let+ tsbitset, rest = Sector.finalize bitset rest in
     assert (rest = []) ;
-    { free_start = f; free_queue = q; free_sectors }, ts
+    ( { free_start = f; free_queue = q; bitset; bitset_start; free_sectors }
+    , tsqueue @ tsbitset )
 
   let allocate ~free_queue sector =
     let* count = Sector.count_new sector in
@@ -313,9 +350,14 @@ module Make (B : Context.A_DISK) = struct
     then alloc_queue [] count free_queue
     else Lwt_result.return (free_queue, [])
 
-  let load (free_start, ptr, free_sectors) =
-    let+ free_queue = if Sector.is_null_ptr ptr then create () else Sector.load ptr in
-    { free_start; free_queue; free_sectors }
+  let load (free_start, queue_ptr, bitset_ptr, bitset_start, free_sectors) =
+    let* free_queue =
+      if Sector.is_null_ptr queue_ptr then create () else Sector.load queue_ptr
+    in
+    let+ bitset =
+      if Sector.is_null_ptr bitset_ptr then Bitset.create () else Sector.load bitset_ptr
+    in
+    { free_start; free_queue; bitset; bitset_start; free_sectors }
 
   let verify_checksum { free_queue = ptr; _ } =
     let rec verify_queue queue =
