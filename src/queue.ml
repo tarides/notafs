@@ -252,16 +252,15 @@ module Make (B : Context.A_DISK) = struct
   let pop_old_generation q last_gen_id =
     let rec pop queue =
       let* queue, lst, _ = pop_front queue q.bitset 1 in
-      let range = List.nth lst 0 
-      in
+      let range = List.nth lst 0 in
       if range = last_gen_id
       then Lwt_result.return queue
       else
         let* () = Bitset.free_range q.bitset range in
         pop queue
     in
-    let+ queue = pop q.free_queue in 
-    {q with free_queue = queue}
+    let+ queue = pop q.free_queue in
+    { q with free_queue = queue }
 
   let pop_front { free_start; free_queue; bitset; bitset_start; free_sectors } quantity =
     let easy_alloc =
@@ -290,13 +289,6 @@ module Make (B : Context.A_DISK) = struct
     let _ = pop_front in
     (* just so that pop_front is being used somewhere *)
     let* lst, new_bitset_start = Bitset.pop_front q.bitset q.bitset_start quantity in
-    let rec use = function
-      | a :: b ->
-        let* () = Bitset.use_range q.bitset a in
-        use b
-      | [] -> Lwt_result.return ()
-    in
-    let* () = use lst in
     let+ q = push_discarded q in
     { q with bitset_start = new_bitset_start }, lst
 

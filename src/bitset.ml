@@ -173,14 +173,16 @@ module Make (B : Context.A_DISK) = struct
       let needed = quantity - List.length lst in
       let rec get_id cur_ind needed lst =
         if cur_ind >= nb_sectors || cur_ind = ind + 8 || needed = 0
-        then lst
+        then Lwt_result.return lst
         else (
           let flag = get value (cur_ind mod 8) in
           if flag = 0
-          then get_id (cur_ind + 1) (needed - 1) (cur_ind :: lst)
+          then
+            let* () = use_leaf leaf (cur_ind mod bit_size) in
+            get_id (cur_ind + 1) (needed - 1) (cur_ind :: lst)
           else get_id (cur_ind + 1) needed lst)
       in
-      let lst = get_id ind needed lst in
+      let* lst = get_id ind needed lst in
       if List.length lst = quantity
       then Lwt_result.return (List.nth lst 0, lst)
       else if ind < start_ind && ind + 8 >= start_ind
