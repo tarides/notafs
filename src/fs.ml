@@ -85,7 +85,7 @@ module Make_disk (Clock : Mirage_clock.PCLOCK) (B : Context.A_DISK) :
       else Files.reachable_size t.files
     in
     let+ queue =
-      let* _, root_queue, _ = Root.get_free_queue t.root in
+      let* _, root_queue, _, _, _ = Root.get_free_queue t.root in
       if Sector.is_null_ptr root_queue
       then Lwt_result.return 0
       else Queue.reachable_size t.free_queue
