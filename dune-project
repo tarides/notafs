@@ -32,6 +32,8 @@
   (synopsis "Notafs command-line tool")
   (depends
     (notafs :=version)
+    mirage-block-unix
+    mirage-clock-unix
     cmdliner
     fmt))
 
