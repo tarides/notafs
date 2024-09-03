@@ -17,11 +17,8 @@ As a work-in-progress demo, `notafs` includes a partial implementation of the [`
 To run the unikernel demos, you'll need to pin the `notafs` library, copy the `unikernel-kv` folder out of the project (to avoid recursive issues with `opam-monorepo`), compile it for your prefered Mirage target and create a disk to use:
 
 ```shell
-# Pin the library
-$ cd notafs
-notafs/ $ opam pin add notafs . --with-version=dev
-
 # Copy the mirage-kv demo to another folder
+$ cd notafs
 notafs/ $ cp -r unikernel-kv ../unikernel-kv
 notafs/ $ cd ../unikernel-kv
 
