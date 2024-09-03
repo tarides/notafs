@@ -10,6 +10,8 @@ bug-reports: "https://github.com/tarides/notafs/issues"
 depends: [
   "dune" {>= "3.1"}
   "notafs" {=version}
+  "mirage-block-unix"
+  "mirage-clock-unix"
   "cmdliner"
   "fmt"
   "odoc" {with-doc}
